@@ -16,6 +16,14 @@
 | 模型 | `/public/home/aclsylqidf/shared/MiniMax-H3/diffusers`（symlink 到作业工作区 `$W/model`） |
 | 输入 | `$H/minimax_h3/input/1280X1280.JPEG`（首帧） |
 | 参考片 | `$H/minimax_h3/cmp/reference_fl2va.mp4`（legacy PyTorch 路径 50 步 / 768x928 / 124 帧产物） |
+| transformers / diffusers | 5.14.1 / 0.40.0（精简作业环境不含 torchvision，见下） |
+
+作业镜像是**不含 torchvision** 的精简环境：`jobs/setup.py` 在解包依赖后对库文件做四处幂等适配，仅作用于 processor 的构造与降级分支，不参与模型数值计算——
+① `transformers/processing_utils.py` 在 torchvision 不可用时跳过 `video_processor` 子处理器；
+② `transformers/models/auto/video_processing_auto.py` 的查表补 `is_torchvision_available()` 守卫与空表判空；
+③ `diffusers` 的 `encoders.py` 因 transformers 5.x 移除 `create_mm_token_type_ids`，改按 Qwen3-VL 约定由 token id 推导 `mm_token_type_ids`（图像→1、视频→2）；
+④ 模型目录 `processor/preprocessor_config.json` 的 `image_processor_type` 落实为同目录可导入的 `Qwen2VLImageProcessor`。
+另外 `transformers 5.0.0` 与 `torchvision` 被显式跳过，`flash_attn` 只保留供应商 `.so`（其 Python 包依赖未随镜像提供的 einops）。
 
 ## 1. 目录
 
