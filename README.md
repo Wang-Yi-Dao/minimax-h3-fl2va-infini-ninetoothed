@@ -63,7 +63,8 @@ jobs/     setup.py（集群侧解包/装配）、run_tp8_fl2va.sh（TP8 出片 +
 build/    bld_infinicore.sh（InfiniCore 构建配方）、rebuild_and_repack.sh（改 kernel 后重生成 + 重打包）
 results/  compare_nn38_50steps.txt（官方 compare 原始输出，含同配置重跑）、ab_2step_table.md（2 步 A/B 实测）
 docs/     初赛实验报告.md、决赛实验报告.md、提交清单.md
-figures/  compare_nn38_platform.png（作业卡片 + 结果区）、compare_nn38_log.png（日志框内的官方 compare 输出，80.012%）
+figures/  compare_nn38_platform.png（作业卡片 + 结果区）、compare_nn38_log.png（日志框内的官方 compare 输出，80.012%）、
+          video_frames_nl50.png（成片第 1/61/124 帧抽帧对照）
 ```
 
 ## 复现
