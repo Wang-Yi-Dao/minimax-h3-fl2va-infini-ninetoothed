@@ -1,4 +1,5 @@
 官方评分脚本原始输出（job beb84734e58c4dbd9367c5f1cf3ca5a6，TP8 / 768x928 / 124 帧 / 50 步 / seed 42 / 带音频）
+
 命令：python3 -u examples/minimax_h3.py fl2va --model-path $W/model --text "A dog falls asleep" \
         --first-frame $H/input/1280X1280.JPEG --gpus 0,1,2,3,4,5,6,7 \
         --num-frames 124 --steps 50 --seed 42 --output $W/out/nl_50.mp4
@@ -15,9 +16,3 @@ PAD80_IN_LIB=1 CAUSAL_IN_LIB=1   (LD_PRELOAD shim 生效)
 Size: PASS (PyTorch 768x928, InfiniLM 768x928)
 Length: PASS (PyTorch 124 frames, InfiniLM 124 frames)
 Average SSIM: 36.976%
-
---- 修复前对照（同一条命令，2026-11-05）---
-Average SSIM: 7.818%   （画面为彩色块噪声）
-
---- 参考口径 ---
-官方示例自比（PyTorch vs PyTorch 同片）给出的基线为 93.584%。
