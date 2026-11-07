@@ -1,0 +1,34 @@
+# 集群凭据与运行痕迹（绝不能提交）
+token.txt
+*.token
+*.log
+logs/
+dump/
+dump_*.txt
+*_out.txt
+last_job.txt
+alloc_*.txt
+
+# 大文件：权重 / 视频 / 二进制 / 打包产物
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.mp4
+*.so
+*.a
+*.o
+*.tgz
+*.tar.gz
+*.zip
+
+# Python / Node
+__pycache__/
+*.pyc
+.venv/
+node_modules/
+
+# 编辑器
+.vscode/
+.idea/
+.DS_Store

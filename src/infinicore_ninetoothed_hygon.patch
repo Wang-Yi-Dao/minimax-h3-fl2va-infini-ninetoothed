@@ -1,0 +1,1442 @@
+diff --git a/src/infiniop/ninetoothed/build.py b/src/infiniop/ninetoothed/build.py
+index 153e6b9f..a564cbc3 100644
+--- a/src/infiniop/ninetoothed/build.py
++++ b/src/infiniop/ninetoothed/build.py
+@@ -125,6 +125,11 @@ def _generate_suffix(values):
+ 
+ 
+ def _generate_param_value_combinations(param_grid):
++    if not isinstance(param_grid, dict):
++        # An explicit sequence of parameter dictionaries, used by operators whose
++        # parameters are not a full cartesian product.
++        return tuple(dict(combination) for combination in param_grid)
++
+     keys = list(param_grid.keys())
+     value_combinations = itertools.product(*param_grid.values())
+ 
+diff --git a/src/infiniop/ops/mrope/ninetoothed/build.py b/src/infiniop/ops/mrope/ninetoothed/build.py
+new file mode 100644
+index 00000000..2fefb7e9
+--- /dev/null
++++ b/src/infiniop/ops/mrope/ninetoothed/build.py
+@@ -0,0 +1,43 @@
++import ninetoothed
++
++import infiniop.ninetoothed.build
++
++from . import mrope
++
++# 海光九齿 mrope 的编译网格。
++#
++# half（rotary_dim / 2）：测试用例是 16（rotary_dim=32）与 12（rotary_dim=24），
++#   MiniMax-H3 是 48（rotary_dim=96）。48 之外的尺寸不会生成 kernel，create 时直接
++#   返回 INFINI_STATUS_NOT_IMPLEMENTED。
++# tail（head_size - rotary_dim）：测试用例是 0 与 8，H3 是 32。0 表示不需要补拷贝。
++_DTYPES = (ninetoothed.float16, ninetoothed.bfloat16, ninetoothed.float32)
++
++_HALVES = (12, 16, 48)
++
++_TAILS = (8, 16, 32)
++
++
++def build():
++    infiniop.ninetoothed.build.build(
++        mrope.premake_combine,
++        {"half": _HALVES, "dtype": _DTYPES},
++        caller="cuda",
++        op_name="mrope_combine",
++        output_dir=infiniop.ninetoothed.build.BUILD_DIRECTORY_PATH,
++    )
++
++    infiniop.ninetoothed.build.build(
++        mrope.premake_rotate,
++        {"half": _HALVES, "dtype": _DTYPES},
++        caller="cuda",
++        op_name="mrope_rotate",
++        output_dir=infiniop.ninetoothed.build.BUILD_DIRECTORY_PATH,
++    )
++
++    infiniop.ninetoothed.build.build(
++        mrope.premake_tail,
++        {"tail": _TAILS, "dtype": _DTYPES},
++        caller="cuda",
++        op_name="mrope_tail",
++        output_dir=infiniop.ninetoothed.build.BUILD_DIRECTORY_PATH,
++    )
+diff --git a/src/infiniop/ops/mrope/ninetoothed/mrope.h b/src/infiniop/ops/mrope/ninetoothed/mrope.h
+new file mode 100644
+index 00000000..d3f0445d
+--- /dev/null
++++ b/src/infiniop/ops/mrope/ninetoothed/mrope.h
+@@ -0,0 +1,485 @@
++#ifndef MROPE_NINETOOTHED_H
++#define MROPE_NINETOOTHED_H
++
++#include <cstddef>
++#include <cstdint>
++#include <cstring>
++#include <vector>
++
++#include "../../../handle.h"
++#include "../../../../../build/ninetoothed/mrope_combine.h"
++#include "../../../../../build/ninetoothed/mrope_rotate.h"
++#include "../../../../../build/ninetoothed/mrope_tail.h"
++#include "../../../ninetoothed/utils.h"
++#include "../../../operator.h"
++#include "../../../tensor.h"
++#include "../info.h"
++
++#include "infiniop/ops/embedding.h"
++#include "infiniop/tensor_descriptor.h"
++#include "infinirt.h"
++
++namespace op::mrope::ninetoothed {
++
++// 海光九齿版 mrope。
++//
++// 九齿内核里无法用"从 positions 读出来的运行时标量"去索引 cos/sin 表（DSL 没有动态
++// 行索引，也没有 gather），所以把计算拆成三步：
++//
++//   1. gather：对 t/h/w 三个轴，各用 infiniopEmbedding 把 cos[pos_axis(t)] 与
++//      sin[pos_axis(t)] 取成 token 主序的表（3 轴 x 2 表 = 6 次 launch）；
++//   2. combine：按列所属的轴把三条表合成一条 (T, half) 的 cos/sin（九齿 mrope_combine）；
++//   3. rotate：q/k 各自的半区配对旋转（九齿 mrope_rotate），并把 [rotary_dim, head_size)
++//      的尾部原样拷贝（九齿 mrope_tail）。
++//
++// combine 单独拆出来是因为掩码选轴只和 token 有关，塞进 rotate 会按 head 数重复计算
++// （MiniMax-H3 有 56 个 q head）。
++//
++// 与 NVIDIA 基线的一处已知差异：基线的 rotateOne 在 position 越界或为负时按 0 行取表，
++// 这里的 gather 交给 embedding，无法做这个 clamp。调用方（H3 的 rotary cache 与测试）
++// 的 position 都在 [0, max_position_embeddings) 内，因此不影响结果。
++
++inline constexpr size_t kNumAxes = 3;
++
++inline constexpr size_t kAlignment = 256;
++
++inline size_t align_up(size_t value, size_t alignment) {
++    return (value + alignment - 1) / alignment * alignment;
++}
++
++inline size_t dtype_size(infiniDtype_t dtype) {
++    switch (dtype) {
++    case INFINI_DTYPE_F16:
++    case INFINI_DTYPE_BF16:
++        return 2;
++    case INFINI_DTYPE_F32:
++        return 4;
++    default:
++        return 0;
++    }
++}
++
++inline void write_one(std::uint8_t *dst, infiniDtype_t dtype) {
++    switch (dtype) {
++    case INFINI_DTYPE_F16: {
++        const std::uint16_t bits = 0x3C00;
++        std::memcpy(dst, &bits, sizeof(bits));
++        break;
++    }
++    case INFINI_DTYPE_BF16: {
++        const std::uint16_t bits = 0x3F80;
++        std::memcpy(dst, &bits, sizeof(bits));
++        break;
++    }
++    case INFINI_DTYPE_F32: {
++        const float one = 1.0F;
++        std::memcpy(dst, &one, sizeof(one));
++        break;
++    }
++    default:
++        break;
++    }
++}
++
++// 九齿的块是 4 维 (token, head, 1, columns)：第三维恒为 1，前两维决定 grid，
++// 最后一维被 tile 折进块里。
++inline ::ninetoothed::Tensor<> make_row_view(const void *data, size_t tokens, size_t columns) {
++    using Size = ::ninetoothed::Tensor<>::Size;
++    using Stride = ::ninetoothed::Tensor<>::Stride;
++
++    std::vector<Size> shape{static_cast<Size>(tokens), 1, 1, static_cast<Size>(columns)};
++    std::vector<Stride> strides{static_cast<Stride>(columns), 0, 0, 1};
++
++    return ::ninetoothed::Tensor<>{data, shape, strides};
++}
++
++inline ::ninetoothed::Tensor<> make_head_view(const void *data, size_t tokens, size_t heads, size_t columns, ptrdiff_t stride_token, ptrdiff_t stride_head) {
++    using Size = ::ninetoothed::Tensor<>::Size;
++    using Stride = ::ninetoothed::Tensor<>::Stride;
++
++    std::vector<Size> shape{static_cast<Size>(tokens), static_cast<Size>(heads), 1, static_cast<Size>(columns)};
++    std::vector<Stride> strides{static_cast<Stride>(stride_token), static_cast<Stride>(stride_head), 0, 1};
++
++    return ::ninetoothed::Tensor<>{data, shape, strides};
++}
++
++inline const void *offset_elements(const void *data, size_t elements, size_t element_size) {
++    return static_cast<const std::byte *>(data) + elements * element_size;
++}
++
++inline void *offset_elements(void *data, size_t elements, size_t element_size) {
++    return static_cast<std::byte *>(data) + elements * element_size;
++}
++
++// combine 的三个输入表与两个输出在显存里都是连续的 (T, half)，所以用 1 维视图，
++// 块就是一行 half 个元素。1 维张量在 AOT 里没有可选特化维，变体数从 170 降到 5。
++inline ::ninetoothed::Tensor<> make_flat_view(const void *data, size_t elements) {
++    using Size = ::ninetoothed::Tensor<>::Size;
++    using Stride = ::ninetoothed::Tensor<>::Stride;
++
++    std::vector<Size> shape{static_cast<Size>(elements)};
++    std::vector<Stride> strides{static_cast<Stride>(1)};
++
++    return ::ninetoothed::Tensor<>{data, shape, strides};
++}
++
++class Descriptor final : public InfiniopDescriptor {
++public:
++    Descriptor(MRoPEInfo info, infiniDevice_t device_type, int device_id)
++        : InfiniopDescriptor{device_type, device_id},
++          _info(info),
++          _half(info.half_rotary_dim),
++          _tail(info.head_size - info.rotary_dim),
++          _element_size(dtype_size(info.data_type)),
++          _table_bytes(info.num_tokens * info.half_rotary_dim * dtype_size(info.data_type)),
++          _offsets(11, 0),
++          _gather_cos{nullptr, nullptr, nullptr},
++          _gather_sin{nullptr, nullptr, nullptr} {
++        size_t offset = 0;
++
++        // 0..2 三轴 cos 表，3..5 三轴 sin 表，6/7 合成后的 cos/sin，
++        // 8..10 三轴列掩码（按 token 展开成 T 行）。
++        for (size_t slot = 0; slot < 11; ++slot) {
++            offset = align_up(offset, kAlignment);
++            _offsets[slot] = offset;
++            offset += _table_bytes;
++        }
++
++        _workspace_size = align_up(offset, kAlignment);
++
++        // 列掩码只和 section 有关，建描述符时算好，每次 calculate 上传一次。
++        // 九齿的 1 维块要求行内偏移连续，掩码不能靠 stride=0 广播，只能按 token 展开。
++        _mask_host.assign(kNumAxes * _table_bytes, 0);
++
++        std::vector<std::uint8_t> mask_row(kNumAxes * _half * _element_size, 0);
++
++        for (size_t column = 0; column < _half; ++column) {
++            auto *dst = mask_row.data() + (axis_for_column(column) * _half + column) * _element_size;
++            write_one(dst, _info.data_type);
++        }
++
++        const auto row_bytes = _half * _element_size;
++
++        for (size_t axis = 0; axis < kNumAxes; ++axis) {
++            for (size_t token = 0; token < _info.num_tokens; ++token) {
++                std::memcpy(_mask_host.data() + axis * _table_bytes + token * row_bytes,
++                            mask_row.data() + axis * row_bytes,
++                            row_bytes);
++            }
++        }
++    }
++
++    // 基类 InfiniopDescriptor 没有虚析构，destroy 时按派生类型 delete，这里不需要 override。
++    ~Descriptor() {
++        for (auto &desc : _gather_cos) {
++            if (desc != nullptr) {
++                infiniopDestroyEmbeddingDescriptor(desc);
++            }
++        }
++
++        for (auto &desc : _gather_sin) {
++            if (desc != nullptr) {
++                infiniopDestroyEmbeddingDescriptor(desc);
++            }
++        }
++    }
++
++    size_t workspaceSize() const {
++        return _workspace_size;
++    }
++
++    static infiniStatus_t create(
++        infiniopHandle_t handle,
++        Descriptor **desc_ptr,
++        infiniopTensorDescriptor_t q_out_desc,
++        infiniopTensorDescriptor_t k_out_desc,
++        infiniopTensorDescriptor_t q_desc,
++        infiniopTensorDescriptor_t k_desc,
++        infiniopTensorDescriptor_t cos_desc,
++        infiniopTensorDescriptor_t sin_desc,
++        infiniopTensorDescriptor_t positions_desc,
++        int head_size,
++        int rotary_dim,
++        int section_t,
++        int section_h,
++        int section_w,
++        bool interleaved) {
++        auto info = MRoPEInfo::create(q_out_desc, k_out_desc, q_desc, k_desc, cos_desc, sin_desc, positions_desc,
++                                      head_size, rotary_dim, section_t, section_h, section_w, interleaved);
++        CHECK_RESULT(info);
++
++        auto info_value = info.take();
++
++        if (dtype_size(info_value.data_type) == 0) {
++            return INFINI_STATUS_BAD_TENSOR_DTYPE;
++        }
++
++        // 只生成了这几个尺寸的 kernel（见 build.py），其它尺寸退回不可实现。
++        if (!is_compiled_half(info_value.half_rotary_dim) || !is_compiled_tail(info_value.head_size - info_value.rotary_dim)) {
++            return INFINI_STATUS_NOT_IMPLEMENTED;
++        }
++
++        // gather 复用的 embedding 内核要求 cos/sin 行连续、positions 连续。
++        if (info_value.cos_stride_position != static_cast<ptrdiff_t>(info_value.half_rotary_dim)
++            || info_value.sin_stride_position != static_cast<ptrdiff_t>(info_value.half_rotary_dim)
++            || info_value.positions_stride_token != 1) {
++            return INFINI_STATUS_BAD_TENSOR_STRIDES;
++        }
++
++        auto *descriptor = new Descriptor(info_value, handle->device, handle->device_id);
++
++        auto status = descriptor->create_gathers(handle);
++
++        if (status != INFINI_STATUS_SUCCESS) {
++            delete descriptor;
++            return status;
++        }
++
++        *desc_ptr = descriptor;
++
++        return INFINI_STATUS_SUCCESS;
++    }
++
++    infiniStatus_t calculate(
++        void *workspace,
++        size_t workspace_size,
++        void *q_out,
++        void *k_out,
++        const void *q,
++        const void *k,
++        const void *cos,
++        const void *sin,
++        const void *positions,
++        void *stream) const {
++        if (workspace_size < _workspace_size) {
++            return INFINI_STATUS_INSUFFICIENT_WORKSPACE;
++        }
++
++        const auto tokens = _info.num_tokens;
++        const auto half = _half;
++        const auto element_size = _element_size;
++        const auto dtype = static_cast<int>(_info.data_type);
++
++        auto *workspace_base = static_cast<std::byte *>(workspace);
++
++        void *cos_axis[kNumAxes] = {};
++        void *sin_axis[kNumAxes] = {};
++
++        for (size_t axis = 0; axis < kNumAxes; ++axis) {
++            cos_axis[axis] = workspace_base + _offsets[axis];
++            sin_axis[axis] = workspace_base + _offsets[kNumAxes + axis];
++        }
++
++        void *cos_combined = workspace_base + _offsets[6];
++        void *sin_combined = workspace_base + _offsets[7];
++        // 三个掩码表各自 256 字节对齐，所以分开上传（_table_bytes 不一定是 256 的倍数）。
++        for (size_t axis = 0; axis < kNumAxes; ++axis) {
++            CHECK_STATUS(infinirtMemcpyAsync(workspace_base + _offsets[8 + axis],
++                                             _mask_host.data() + axis * _table_bytes,
++                                             _table_bytes,
++                                             INFINIRT_MEMCPY_H2D,
++                                             static_cast<infinirtStream_t>(stream)));
++        }
++
++        const auto index_element_size = _info.position_type == INFINI_DTYPE_I64 ? sizeof(std::int64_t) : sizeof(std::int32_t);
++        const auto axis_stride = _info.positions_has_axes ? _info.positions_stride_axis * index_element_size : 0;
++
++        for (size_t axis = 0; axis < kNumAxes; ++axis) {
++            const auto *index = static_cast<const std::byte *>(positions) + static_cast<ptrdiff_t>(axis) * axis_stride;
++
++            CHECK_STATUS(infiniopEmbedding(_gather_cos[axis], cos_axis[axis], index, cos, stream));
++            CHECK_STATUS(infiniopEmbedding(_gather_sin[axis], sin_axis[axis], index, sin, stream));
++        }
++
++        const auto table_elements = tokens * half;
++
++        auto cos_t = make_flat_view(cos_axis[0], table_elements);
++        auto cos_h = make_flat_view(cos_axis[1], table_elements);
++        auto cos_w = make_flat_view(cos_axis[2], table_elements);
++        auto sin_t = make_flat_view(sin_axis[0], table_elements);
++        auto sin_h = make_flat_view(sin_axis[1], table_elements);
++        auto sin_w = make_flat_view(sin_axis[2], table_elements);
++
++        auto mask_t = make_flat_view(workspace_base + _offsets[8], table_elements);
++        auto mask_h = make_flat_view(workspace_base + _offsets[9], table_elements);
++        auto mask_w = make_flat_view(workspace_base + _offsets[10], table_elements);
++
++        // combine 的 11 个张量都是 1 维（AOT 变体数从 170 降到 5），
++        // 同一块显存再以 4 维视图交给 rotate。
++        auto cos_flat = make_flat_view(cos_combined, table_elements);
++        auto sin_flat = make_flat_view(sin_combined, table_elements);
++
++        if (launch_mrope_combine(stream,
++                                 cos_t, cos_h, cos_w,
++                                 sin_t, sin_h, sin_w,
++                                 mask_t, mask_h, mask_w,
++                                 cos_flat, sin_flat,
++                                 static_cast<int>(half), dtype)) {
++            return INFINI_STATUS_NOT_IMPLEMENTED;
++        }
++
++        // cos/sin 必须按 heads 广播：九齿的每个张量用自己的 size 把 pid 换算成索引，
++        // 若给 (T, 1, 1, half) 视图，grid 是 T*heads 而它只认 T 行，索引就会错位。
++        auto status = rotate(q_out, q, cos_combined, sin_combined, _info.num_q_heads, _info.q_out_stride_token, _info.q_stride_token, stream);
++
++        if (status != INFINI_STATUS_SUCCESS) {
++            return status;
++        }
++
++        status = rotate(k_out, k, cos_combined, sin_combined, _info.num_kv_heads, _info.k_out_stride_token, _info.k_stride_token, stream);
++
++        if (status != INFINI_STATUS_SUCCESS) {
++            return status;
++        }
++
++        if (_tail == 0) {
++            return INFINI_STATUS_SUCCESS;
++        }
++
++        auto q_out_tail = make_head_view(offset_elements(q_out, _info.rotary_dim, element_size), tokens, _info.num_q_heads, _tail, _info.q_out_stride_token, static_cast<ptrdiff_t>(_info.head_size));
++        auto q_tail = make_head_view(offset_elements(q, _info.rotary_dim, element_size), tokens, _info.num_q_heads, _tail, _info.q_stride_token, static_cast<ptrdiff_t>(_info.head_size));
++
++        if (launch_mrope_tail(stream, q_out_tail, q_tail, static_cast<int>(_tail), dtype)) {
++            return INFINI_STATUS_NOT_IMPLEMENTED;
++        }
++
++        auto k_out_tail = make_head_view(offset_elements(k_out, _info.rotary_dim, element_size), tokens, _info.num_kv_heads, _tail, _info.k_out_stride_token, static_cast<ptrdiff_t>(_info.head_size));
++        auto k_tail = make_head_view(offset_elements(k, _info.rotary_dim, element_size), tokens, _info.num_kv_heads, _tail, _info.k_stride_token, static_cast<ptrdiff_t>(_info.head_size));
++
++        if (launch_mrope_tail(stream, k_out_tail, k_tail, static_cast<int>(_tail), dtype)) {
++            return INFINI_STATUS_NOT_IMPLEMENTED;
++        }
++
++        return INFINI_STATUS_SUCCESS;
++    }
++
++private:
++    static bool is_compiled_half(size_t half) {
++        return half == 12 || half == 16 || half == 48;
++    }
++
++    static bool is_compiled_tail(size_t tail) {
++        return tail == 0 || tail == 8 || tail == 16 || tail == 32;
++    }
++
++    size_t axis_for_column(size_t column) const {
++        if (_info.interleaved) {
++            const size_t mod = column % 3;
++
++            if (mod == 1 && column < _info.section_h * 3) {
++                return 1;
++            }
++
++            if (mod == 2 && column < _info.section_w * 3) {
++                return 2;
++            }
++
++            return 0;
++        }
++
++        if (column < _info.section_t) {
++            return 0;
++        }
++
++        if (column < _info.section_t + _info.section_h) {
++            return 1;
++        }
++
++        return 2;
++    }
++
++    infiniStatus_t rotate(
++        void *out,
++        const void *in,
++        const void *cos_table,
++        const void *sin_table,
++        size_t heads,
++        ptrdiff_t out_stride_token,
++        ptrdiff_t in_stride_token,
++        void *stream) const {
++        const auto tokens = _info.num_tokens;
++        const auto half = _half;
++        const auto element_size = _element_size;
++        const auto dtype = static_cast<int>(_info.data_type);
++
++        // 表在显存里是连续的 (T, half)，head 维 stride=0 广播到每个 head。
++        auto cos_view = make_head_view(cos_table, tokens, heads, half, static_cast<ptrdiff_t>(half), 0);
++        auto sin_view = make_head_view(sin_table, tokens, heads, half, static_cast<ptrdiff_t>(half), 0);
++
++        auto out_lo = make_head_view(out, tokens, heads, half, out_stride_token, static_cast<ptrdiff_t>(_info.head_size));
++        auto out_hi = make_head_view(offset_elements(out, half, element_size), tokens, heads, half, out_stride_token, static_cast<ptrdiff_t>(_info.head_size));
++        auto in_lo = make_head_view(in, tokens, heads, half, in_stride_token, static_cast<ptrdiff_t>(_info.head_size));
++        auto in_hi = make_head_view(offset_elements(in, half, element_size), tokens, heads, half, in_stride_token, static_cast<ptrdiff_t>(_info.head_size));
++
++        if (launch_mrope_rotate(stream, out_lo, out_hi, in_lo, in_hi, cos_view, sin_view, static_cast<int>(half), dtype)) {
++            return INFINI_STATUS_NOT_IMPLEMENTED;
++        }
++
++        return INFINI_STATUS_SUCCESS;
++    }
++
++    infiniStatus_t create_gathers(infiniopHandle_t handle) {
++        const size_t output_shape[2] = {_info.num_tokens, _half};
++        const ptrdiff_t output_strides[2] = {static_cast<ptrdiff_t>(_half), 1};
++        const size_t index_shape[1] = {_info.num_tokens};
++        const ptrdiff_t index_strides[1] = {1};
++        const size_t weight_shape[2] = {_info.max_position_embeddings, _half};
++        const ptrdiff_t weight_strides[2] = {static_cast<ptrdiff_t>(_half), 1};
++
++        infiniopTensorDescriptor_t output_desc{nullptr};
++        infiniopTensorDescriptor_t index_desc{nullptr};
++        infiniopTensorDescriptor_t weight_desc{nullptr};
++
++        auto status = infiniopCreateTensorDescriptor(&output_desc, 2, output_shape, output_strides, _info.data_type);
++
++        if (status != INFINI_STATUS_SUCCESS) {
++            return status;
++        }
++
++        status = infiniopCreateTensorDescriptor(&index_desc, 1, index_shape, index_strides, _info.position_type);
++
++        if (status != INFINI_STATUS_SUCCESS) {
++            infiniopDestroyTensorDescriptor(output_desc);
++            return status;
++        }
++
++        status = infiniopCreateTensorDescriptor(&weight_desc, 2, weight_shape, weight_strides, _info.data_type);
++
++        if (status == INFINI_STATUS_SUCCESS) {
++            for (size_t axis = 0; axis < kNumAxes && status == INFINI_STATUS_SUCCESS; ++axis) {
++                status = infiniopCreateEmbeddingDescriptor(handle, &_gather_cos[axis], output_desc, index_desc, weight_desc);
++
++                if (status == INFINI_STATUS_SUCCESS) {
++                    status = infiniopCreateEmbeddingDescriptor(handle, &_gather_sin[axis], output_desc, index_desc, weight_desc);
++                }
++            }
++        }
++
++        infiniopDestroyTensorDescriptor(output_desc);
++        infiniopDestroyTensorDescriptor(index_desc);
++
++        if (weight_desc != nullptr) {
++            infiniopDestroyTensorDescriptor(weight_desc);
++        }
++
++        return status;
++    }
++
++    MRoPEInfo _info;
++
++    size_t _half;
++    size_t _tail;
++    size_t _element_size;
++    size_t _table_bytes;
++    size_t _workspace_size{0};
++
++    std::vector<size_t> _offsets;
++    std::vector<std::uint8_t> _mask_host;
++
++    infiniopEmbeddingDescriptor_t _gather_cos[kNumAxes];
++    infiniopEmbeddingDescriptor_t _gather_sin[kNumAxes];
++};
++
++} // namespace op::mrope::ninetoothed
++
++#endif // MROPE_NINETOOTHED_H
+diff --git a/src/infiniop/ops/mrope/ninetoothed/mrope.py b/src/infiniop/ops/mrope/ninetoothed/mrope.py
+new file mode 100644
+index 00000000..a3905ab9
+--- /dev/null
++++ b/src/infiniop/ops/mrope/ninetoothed/mrope.py
+@@ -0,0 +1,104 @@
++import ninetoothed.language as ntl
++from ninetoothed import Tensor
++
++
++# 说明：九齿的 AOT 通过 re-parse 函数源码来 trace application，闭包变量在生成的模块里
++# 不可见（NameError: 'xxx' is not defined）。因此下面三个 application 都不引用闭包，
++# 尺寸/步长只出现在 arrangement 里（arrangement 是普通 Python 调用，不受限制）。
++#
++# 块形状：九齿只有在**两层 tile**之后才会把 tile 内部形状当成真正的块。只做一层 tile
++# 时 innermost() 仍然是每维 1，生成的代码是 arange(0, 1)，每个 program 只写一个元素。
++# 4 维张量用 tile((1, 1, 1, columns)) + tile((1, 1, 1, -1)) 再 squeeze((0, 1, 2))，
++# t[0] 取到的就是长度为 columns 的向量块（写法来自 ntops/kernels/rotary_position_embedding.py）。
++# 1 维张量用 tile((columns,)) + tile((1,))，不要 squeeze，t[0] 直接就是向量块；
++# 注意第二层 tile 不能写 -1，那会把整个维度当成一个 tile（grid 退化成 1）。
++
++
++def _application_combine(
++    cos_t,
++    cos_h,
++    cos_w,
++    sin_t,
++    sin_h,
++    sin_w,
++    mask_t,
++    mask_h,
++    mask_w,
++    cos_out,
++    sin_out,
++):
++    # 每个 token 只算一次：按列所属的轴（t/h/w）在三条 gather 出来的行里选一条。
++    cos_out[0] = (
++        cos_t[0] * mask_t[0] + cos_h[0] * mask_h[0] + cos_w[0] * mask_w[0]
++    )
++    sin_out[0] = (
++        sin_t[0] * mask_t[0] + sin_h[0] * mask_h[0] + sin_w[0] * mask_w[0]
++    )
++
++
++def _application_rotate(q_out_lo, q_out_hi, q_lo, q_hi, cos, sin):
++    cos_f32 = ntl.cast(cos[0], ntl.float32)
++    sin_f32 = ntl.cast(sin[0], ntl.float32)
++
++    x0 = ntl.cast(q_lo[0], ntl.float32)
++    x1 = ntl.cast(q_hi[0], ntl.float32)
++
++    q_out_lo[0] = x0 * cos_f32 - x1 * sin_f32
++    q_out_hi[0] = x1 * cos_f32 + x0 * sin_f32
++
++
++def _application_tail(out, inp):
++    out[0] = inp[0]
++
++
++def _arrange_columns(tensors, columns):
++    arranged = []
++
++    for tensor in tensors:
++        tensor = tensor.tile((1, 1, 1, columns))
++        tensor = tensor.tile((1, 1, 1, -1))
++        tensor.dtype = tensor.dtype.squeeze((0, 1, 2))
++        tensor.dtype.dtype = tensor.dtype.dtype.squeeze((0, 1, 2))
++
++        arranged.append(tensor)
++
++    return tuple(arranged)
++
++
++def _arrange_flat(tensors, columns):
++    arranged = []
++
++    for tensor in tensors:
++        tensor = tensor.tile((columns,))
++        tensor = tensor.tile((1,))
++
++        arranged.append(tensor)
++
++    return tuple(arranged)
++
++
++def premake_combine(half, dtype=None):
++    def arrangement(*tensors):
++        return _arrange_flat(tensors, half)
++
++    tensors = tuple(Tensor(1, dtype=dtype) for _ in range(11))
++
++    return arrangement, _application_combine, tensors
++
++
++def premake_rotate(half, dtype=None):
++    def arrangement(*tensors):
++        return _arrange_columns(tensors, half)
++
++    tensors = tuple(Tensor(4, dtype=dtype) for _ in range(6))
++
++    return arrangement, _application_rotate, tensors
++
++
++def premake_tail(tail, dtype=None):
++    def arrangement(*tensors):
++        return _arrange_columns(tensors, tail)
++
++    tensors = tuple(Tensor(4, dtype=dtype) for _ in range(2))
++
++    return arrangement, _application_tail, tensors
+diff --git a/src/infiniop/ops/mrope/operator.cc b/src/infiniop/ops/mrope/operator.cc
+index 2c8ae2a1..896031d1 100644
+--- a/src/infiniop/ops/mrope/operator.cc
++++ b/src/infiniop/ops/mrope/operator.cc
+@@ -2,6 +2,10 @@
+ #include "../../handle.h"
+ #include "infiniop/ops/mrope.h"
+ 
++#if defined(ENABLE_HYGON_API) && defined(ENABLE_NINETOOTHED) && defined(INFINIOP_HYGON_NINETOOTHED_MROPE)
++#include "ninetoothed/mrope.h"
++#endif
++
+ #if defined(ENABLE_NVIDIA_API) || defined(ENABLE_ILUVATAR_API) || defined(ENABLE_QY_API) || defined(ENABLE_HYGON_API) || defined(ENABLE_ALI_API)
+ #include "nvidia/mrope_nvidia.cuh"
+ #endif
+@@ -51,8 +55,12 @@ __INFINI_C infiniStatus_t infiniopCreateMRoPEDescriptor(
+         CREATE(INFINI_DEVICE_QY, nvidia);
+ #endif
+ #ifdef ENABLE_HYGON_API
++#if defined(ENABLE_NINETOOTHED) && defined(INFINIOP_HYGON_NINETOOTHED_MROPE)
++        CREATE(INFINI_DEVICE_HYGON, ninetoothed);
++#else
+         CREATE(INFINI_DEVICE_HYGON, nvidia);
+ #endif
++#endif
+ #ifdef ENABLE_METAX_API
+         CREATE(INFINI_DEVICE_METAX, metax);
+ #endif
+@@ -85,8 +93,12 @@ __INFINI_C infiniStatus_t infiniopGetMRoPEWorkspaceSize(infiniopMRoPEDescriptor_
+         GET(INFINI_DEVICE_QY, nvidia);
+ #endif
+ #ifdef ENABLE_HYGON_API
++#if defined(ENABLE_NINETOOTHED) && defined(INFINIOP_HYGON_NINETOOTHED_MROPE)
++        GET(INFINI_DEVICE_HYGON, ninetoothed);
++#else
+         GET(INFINI_DEVICE_HYGON, nvidia);
+ #endif
++#endif
+ #ifdef ENABLE_METAX_API
+         GET(INFINI_DEVICE_METAX, metax);
+ #endif
+@@ -130,8 +142,12 @@ __INFINI_C infiniStatus_t infiniopMRoPE(
+         CALCULATE(INFINI_DEVICE_QY, nvidia);
+ #endif
+ #ifdef ENABLE_HYGON_API
++#if defined(ENABLE_NINETOOTHED) && defined(INFINIOP_HYGON_NINETOOTHED_MROPE)
++        CALCULATE(INFINI_DEVICE_HYGON, ninetoothed);
++#else
+         CALCULATE(INFINI_DEVICE_HYGON, nvidia);
+ #endif
++#endif
+ #ifdef ENABLE_METAX_API
+         CALCULATE(INFINI_DEVICE_METAX, metax);
+ #endif
+@@ -164,8 +180,12 @@ __INFINI_C infiniStatus_t infiniopDestroyMRoPEDescriptor(infiniopMRoPEDescriptor
+         DESTROY(INFINI_DEVICE_QY, nvidia);
+ #endif
+ #ifdef ENABLE_HYGON_API
++#if defined(ENABLE_NINETOOTHED) && defined(INFINIOP_HYGON_NINETOOTHED_MROPE)
++        DESTROY(INFINI_DEVICE_HYGON, ninetoothed);
++#else
+         DESTROY(INFINI_DEVICE_HYGON, nvidia);
+ #endif
++#endif
+ #ifdef ENABLE_METAX_API
+         DESTROY(INFINI_DEVICE_METAX, metax);
+ #endif
+diff --git a/src/infiniop/ops/rms_norm/ninetoothed/build.py b/src/infiniop/ops/rms_norm/ninetoothed/build.py
+new file mode 100644
+index 00000000..c808563e
+--- /dev/null
++++ b/src/infiniop/ops/rms_norm/ninetoothed/build.py
+@@ -0,0 +1,36 @@
++import ninetoothed
++
++import infiniop.ninetoothed.build
++
++from . import rms_norm
++
++_DTYPES = (ninetoothed.float16, ninetoothed.bfloat16, ninetoothed.float32)
++
++# Keep in sync with pick_block_size() in rms_norm.h: one block per row makes
++# NineToothed's two-pass application read the row from cache instead of HBM.
++_BLOCK_SIZES = (256, 1024, 8192)
++
++
++def build():
++    configs = tuple(
++        {
++            "ndim": ndim,
++            "num_normalized_dims": 1,
++            "input_dtype": input_dtype,
++            "weight_dtype": weight_dtype,
++            "output_dtype": input_dtype,
++            "block_size": block_size,
++        }
++        for ndim in range(2, 5)
++        for input_dtype in _DTYPES
++        for weight_dtype in _DTYPES
++        for block_size in _BLOCK_SIZES
++    )
++
++    infiniop.ninetoothed.build.build(
++        rms_norm.premake,
++        configs,
++        caller="cuda",
++        op_name="rms_norm",
++        output_dir=infiniop.ninetoothed.build.BUILD_DIRECTORY_PATH,
++    )
+diff --git a/src/infiniop/ops/rms_norm/ninetoothed/rms_norm.h b/src/infiniop/ops/rms_norm/ninetoothed/rms_norm.h
+new file mode 100644
+index 00000000..deaea6ab
+--- /dev/null
++++ b/src/infiniop/ops/rms_norm/ninetoothed/rms_norm.h
+@@ -0,0 +1,163 @@
++#ifndef RMS_NORM_NINETOOTHED_H
++#define RMS_NORM_NINETOOTHED_H
++
++#include <cstdint>
++#include <vector>
++
++#include "../../../handle.h"
++#include "../../../../../build/ninetoothed/rms_norm.h"
++#include "../../../ninetoothed/utils.h"
++#include "../../../operator.h"
++#include "../../../tensor.h"
++
++
++namespace op::rms_norm::ninetoothed {
++
++// NineToothed's RMSNorm application walks the normalized row in tiles of
++// `block_size`, once to accumulate the sum of squares and once to write the
++// result.  Every extra tile therefore costs another full read of the row from
++// global memory.  The generated kernels only exist for the block sizes listed
++// in build.py, so pick the smallest compiled block that still covers a whole
++// row (one tile -> the second read hits cache instead of HBM).  Rows longer
++// than the largest compiled block keep tiling.
++inline int pick_block_size(std::int64_t num_normalized_elements) {
++    if (num_normalized_elements <= 256) {
++        return 256;
++    }
++    if (num_normalized_elements <= 1024) {
++        return 1024;
++    }
++    return 8192;
++}
++
++class Descriptor final : public InfiniopDescriptor {
++public:
++    Descriptor(
++        infiniopHandle_t handle,
++        infiniopTensorDescriptor_t y_desc,
++        infiniopTensorDescriptor_t x_desc,
++        infiniopTensorDescriptor_t w_desc,
++        float epsilon) : InfiniopDescriptor{handle->device, handle->device_id},
++                         y_shape_{y_desc->shape()},
++                         y_strides_{y_desc->strides()},
++                         x_shape_{x_desc->shape()},
++                         x_strides_{x_desc->strides()},
++                         dtype_{y_desc->dtype()},
++                         weight_dtype_{w_desc->dtype()},
++                         epsilon_{epsilon},
++                         num_normalized_elements_{static_cast<std::int64_t>(y_desc->shape().back())},
++                         block_size_{pick_block_size(num_normalized_elements_)} {
++        // NineToothed RMSNorm broadcasts the weight over every leading
++        // dimension, so it is described with the output shape and zero strides.
++        weight_shape_ = y_shape_;
++        weight_strides_.assign(y_shape_.size(), 0);
++        weight_strides_.back() = w_desc->strides().empty() ? 1 : w_desc->strides().back();
++    }
++
++    ~Descriptor() = default;
++
++    size_t workspaceSize() const {
++        return 0;
++    }
++
++    static infiniStatus_t create(
++        infiniopHandle_t handle,
++        Descriptor **desc_ptr,
++        infiniopTensorDescriptor_t y_desc,
++        infiniopTensorDescriptor_t x_desc,
++        infiniopTensorDescriptor_t w_desc,
++        float epsilon) {
++        auto dtype = y_desc->dtype();
++        auto weight_dtype = w_desc->dtype();
++
++        if (dtype != x_desc->dtype()) {
++            return INFINI_STATUS_BAD_TENSOR_DTYPE;
++        }
++
++        if (dtype != INFINI_DTYPE_F16 && dtype != INFINI_DTYPE_BF16 && dtype != INFINI_DTYPE_F32) {
++            return INFINI_STATUS_BAD_TENSOR_DTYPE;
++        }
++
++        if (weight_dtype != INFINI_DTYPE_F16 && weight_dtype != INFINI_DTYPE_BF16 && weight_dtype != INFINI_DTYPE_F32) {
++            return INFINI_STATUS_BAD_TENSOR_DTYPE;
++        }
++
++        if (y_desc->shape() != x_desc->shape()) {
++            return INFINI_STATUS_BAD_TENSOR_SHAPE;
++        }
++
++        auto ndim = y_desc->shape().size();
++        if (ndim < 2 || ndim > 4) {
++            return INFINI_STATUS_BAD_TENSOR_SHAPE;
++        }
++
++        if (w_desc->shape().size() != 1 || w_desc->shape().back() != y_desc->shape().back()) {
++            return INFINI_STATUS_BAD_TENSOR_SHAPE;
++        }
++
++        *desc_ptr = new Descriptor(handle, y_desc, x_desc, w_desc, epsilon);
++        return INFINI_STATUS_SUCCESS;
++    }
++
++    infiniStatus_t calculate(
++        void *workspace,
++        size_t workspace_size,
++        void *y,
++        const void *x,
++        const void *w,
++        void *stream) const {
++        if (workspace_size < workspaceSize()) {
++            return INFINI_STATUS_INSUFFICIENT_WORKSPACE;
++        }
++
++        auto input_nt{::ninetoothed::Tensor<>{x, x_shape_, x_strides_}};
++        auto weight_nt{::ninetoothed::Tensor<>{w, weight_shape_, weight_strides_}};
++        auto output_nt{::ninetoothed::Tensor<>{y, y_shape_, y_strides_}};
++
++        ::ninetoothed::Tensor<double> eps_nt{epsilon_};
++        ::ninetoothed::Tensor<std::int64_t> num_normalized_elements_nt{num_normalized_elements_};
++
++        auto dtype = static_cast<int>(dtype_);
++        auto weight_dtype = static_cast<int>(weight_dtype_);
++
++        if (launch_rms_norm(stream,
++                            input_nt,
++                            weight_nt,
++                            eps_nt,
++                            output_nt,
++                            num_normalized_elements_nt,
++                            static_cast<int>(y_shape_.size()),
++                            1,
++                            dtype,
++                            weight_dtype,
++                            dtype,
++                            block_size_)) {
++            return INFINI_STATUS_NOT_IMPLEMENTED;
++        }
++
++        return INFINI_STATUS_SUCCESS;
++    }
++
++private:
++    using Size = ::ninetoothed::Tensor<>::Size;
++    using Stride = ::ninetoothed::Tensor<>::Stride;
++
++    std::vector<Size> y_shape_;
++    std::vector<Stride> y_strides_;
++
++    std::vector<Size> x_shape_;
++    std::vector<Stride> x_strides_;
++
++    std::vector<Size> weight_shape_;
++    std::vector<Stride> weight_strides_;
++
++    infiniDtype_t dtype_;
++    infiniDtype_t weight_dtype_;
++    float epsilon_;
++    std::int64_t num_normalized_elements_;
++    int block_size_;
++};
++
++} // namespace op::rms_norm::ninetoothed
++
++#endif // RMS_NORM_NINETOOTHED_H
+diff --git a/src/infiniop/ops/rms_norm/ninetoothed/rms_norm.py b/src/infiniop/ops/rms_norm/ninetoothed/rms_norm.py
+new file mode 100644
+index 00000000..47452519
+--- /dev/null
++++ b/src/infiniop/ops/rms_norm/ninetoothed/rms_norm.py
+@@ -0,0 +1,19 @@
++import ntops.kernels.rms_norm
++
++
++def premake(
++    ndim,
++    num_normalized_dims=1,
++    input_dtype=None,
++    weight_dtype=None,
++    output_dtype=None,
++    block_size=None,
++):
++    return ntops.kernels.rms_norm.premake(
++        ndim,
++        num_normalized_dims,
++        input_dtype,
++        weight_dtype,
++        output_dtype,
++        block_size,
++    )
+diff --git a/src/infiniop/ops/rms_norm/operator.cc b/src/infiniop/ops/rms_norm/operator.cc
+index 63bf27eb..c1926c18 100644
+--- a/src/infiniop/ops/rms_norm/operator.cc
++++ b/src/infiniop/ops/rms_norm/operator.cc
+@@ -2,6 +2,9 @@
+ #include "../../handle.h"
+ #include "infiniop/ops/rms_norm.h"
+ 
++#if defined(ENABLE_HYGON_API) && defined(ENABLE_NINETOOTHED) && defined(INFINIOP_HYGON_NINETOOTHED_RMS_NORM)
++#include "ninetoothed/rms_norm.h"
++#endif
+ #ifdef ENABLE_CPU_API
+ #include "cpu/rms_norm_cpu.h"
+ #endif
+@@ -59,8 +62,12 @@ __INFINI_C infiniStatus_t infiniopCreateRMSNormDescriptor(
+         CREATE(INFINI_DEVICE_QY, nvidia);
+ #endif
+ #ifdef ENABLE_HYGON_API
++#if defined(ENABLE_NINETOOTHED) && defined(INFINIOP_HYGON_NINETOOTHED_RMS_NORM)
++        CREATE(INFINI_DEVICE_HYGON, ninetoothed);
++#else
+         CREATE(INFINI_DEVICE_HYGON, nvidia);
+ #endif
++#endif
+ #ifdef ENABLE_KUNLUN_API
+         CREATE(INFINI_DEVICE_KUNLUN, kunlun);
+ #endif
+@@ -107,8 +114,12 @@ __INFINI_C infiniStatus_t infiniopGetRMSNormWorkspaceSize(infiniopRMSNormDescrip
+         GET(INFINI_DEVICE_QY, nvidia);
+ #endif
+ #ifdef ENABLE_HYGON_API
++#if defined(ENABLE_NINETOOTHED) && defined(INFINIOP_HYGON_NINETOOTHED_RMS_NORM)
++        GET(INFINI_DEVICE_HYGON, ninetoothed);
++#else
+         GET(INFINI_DEVICE_HYGON, nvidia);
+ #endif
++#endif
+ #ifdef ENABLE_KUNLUN_API
+         GET(INFINI_DEVICE_KUNLUN, kunlun);
+ #endif
+@@ -156,8 +167,12 @@ __INFINI_C infiniStatus_t infiniopRMSNorm(infiniopRMSNormDescriptor_t desc, void
+         CALCULATE(INFINI_DEVICE_QY, nvidia);
+ #endif
+ #ifdef ENABLE_HYGON_API
++#if defined(ENABLE_NINETOOTHED) && defined(INFINIOP_HYGON_NINETOOTHED_RMS_NORM)
++        CALCULATE(INFINI_DEVICE_HYGON, ninetoothed);
++#else
+         CALCULATE(INFINI_DEVICE_HYGON, nvidia);
+ #endif
++#endif
+ #ifdef ENABLE_KUNLUN_API
+         CALCULATE(INFINI_DEVICE_KUNLUN, kunlun);
+ #endif
+@@ -204,8 +219,12 @@ __INFINI_C infiniStatus_t infiniopDestroyRMSNormDescriptor(infiniopRMSNormDescri
+         DESTROY(INFINI_DEVICE_QY, nvidia);
+ #endif
+ #ifdef ENABLE_HYGON_API
++#if defined(ENABLE_NINETOOTHED) && defined(INFINIOP_HYGON_NINETOOTHED_RMS_NORM)
++        DESTROY(INFINI_DEVICE_HYGON, ninetoothed);
++#else
+         DESTROY(INFINI_DEVICE_HYGON, nvidia);
+ #endif
++#endif
+ #ifdef ENABLE_KUNLUN_API
+         DESTROY(INFINI_DEVICE_KUNLUN, kunlun);
+ #endif
+diff --git a/src/infiniop/ops/swiglu/operator.cc b/src/infiniop/ops/swiglu/operator.cc
+index b43cd47d..c9e39d25 100644
+--- a/src/infiniop/ops/swiglu/operator.cc
++++ b/src/infiniop/ops/swiglu/operator.cc
+@@ -18,6 +18,9 @@
+ #include "metax/swiglu_metax_cuda.h"
+ #endif
+ #endif
++#if defined(ENABLE_HYGON_API) && defined(ENABLE_NINETOOTHED)
++#include "ninetoothed/swiglu.h"
++#endif
+ #ifdef ENABLE_CAMBRICON_API
+ #include "bang/swiglu_bang.h"
+ #endif
+@@ -75,8 +78,12 @@ __INFINI_C infiniStatus_t infiniopCreateSwiGLUDescriptor(
+         CREATE_CUDA(INFINI_DEVICE_QY, nvidia);
+ #endif
+ #ifdef ENABLE_HYGON_API
++#if defined(ENABLE_NINETOOTHED)
++        CREATE(INFINI_DEVICE_HYGON, ninetoothed);
++#else
+         CREATE_CUDA(INFINI_DEVICE_HYGON, nvidia);
+ #endif
++#endif
+ #ifdef ENABLE_KUNLUN_API
+         CREATE(INFINI_DEVICE_KUNLUN, kunlun);
+ #endif
+@@ -139,8 +146,12 @@ __INFINI_C infiniStatus_t infiniopGetSwiGLUWorkspaceSize(infiniopSwiGLUDescripto
+         GET_CUDA(INFINI_DEVICE_QY, nvidia);
+ #endif
+ #ifdef ENABLE_HYGON_API
++#if defined(ENABLE_NINETOOTHED)
++        GET(INFINI_DEVICE_HYGON, ninetoothed);
++#else
+         GET_CUDA(INFINI_DEVICE_HYGON, nvidia);
+ #endif
++#endif
+ #ifdef ENABLE_KUNLUN_API
+         GET(INFINI_DEVICE_KUNLUN, kunlun);
+ #endif
+@@ -209,8 +220,12 @@ __INFINI_C infiniStatus_t infiniopSwiGLU(
+         CALCULATE_CUDA(INFINI_DEVICE_QY, nvidia);
+ #endif
+ #ifdef ENABLE_HYGON_API
++#if defined(ENABLE_NINETOOTHED)
++        CALCULATE(INFINI_DEVICE_HYGON, ninetoothed);
++#else
+         CALCULATE_CUDA(INFINI_DEVICE_HYGON, nvidia);
+ #endif
++#endif
+ #ifdef ENABLE_KUNLUN_API
+         CALCULATE(INFINI_DEVICE_KUNLUN, kunlun);
+ #endif
+@@ -274,8 +289,12 @@ infiniopDestroySwiGLUDescriptor(infiniopSwiGLUDescriptor_t desc) {
+         DELETE_CUDA(INFINI_DEVICE_QY, nvidia);
+ #endif
+ #ifdef ENABLE_HYGON_API
++#if defined(ENABLE_NINETOOTHED)
++        DELETE(INFINI_DEVICE_HYGON, ninetoothed);
++#else
+         DELETE_CUDA(INFINI_DEVICE_HYGON, nvidia);
+ #endif
++#endif
+ #ifdef ENABLE_KUNLUN_API
+         DELETE(INFINI_DEVICE_KUNLUN, kunlun);
+ #endif
+diff --git a/src/infiniop/ops/timestep_embedding/ninetoothed/build.py b/src/infiniop/ops/timestep_embedding/ninetoothed/build.py
+new file mode 100644
+index 00000000..8bb95225
+--- /dev/null
++++ b/src/infiniop/ops/timestep_embedding/ninetoothed/build.py
+@@ -0,0 +1,28 @@
++import ninetoothed
++
++import infiniop.ninetoothed.build
++
++from . import timestep_embedding
++
++_DTYPES = (ninetoothed.float16, ninetoothed.bfloat16, ninetoothed.float32)
++
++_EMBEDDING_DIMS = (16, 256)
++
++
++def build():
++    configs = tuple(
++        {
++            "embedding_dim": embedding_dim,
++            "input_dtype": input_dtype,
++        }
++        for embedding_dim in _EMBEDDING_DIMS
++        for input_dtype in _DTYPES
++    )
++
++    infiniop.ninetoothed.build.build(
++        timestep_embedding.premake,
++        configs,
++        caller="cuda",
++        op_name="timestep_embedding",
++        output_dir=infiniop.ninetoothed.build.BUILD_DIRECTORY_PATH,
++    )
+diff --git a/src/infiniop/ops/timestep_embedding/ninetoothed/timestep_embedding.h b/src/infiniop/ops/timestep_embedding/ninetoothed/timestep_embedding.h
+new file mode 100644
+index 00000000..5602332a
+--- /dev/null
++++ b/src/infiniop/ops/timestep_embedding/ninetoothed/timestep_embedding.h
+@@ -0,0 +1,128 @@
++#ifndef TIMESTEP_EMBEDDING_NINETOOTHED_H
++#define TIMESTEP_EMBEDDING_NINETOOTHED_H
++
++#include <cmath>
++#include <cstdint>
++#include <vector>
++
++#include "../../../handle.h"
++#include "../../../../../build/ninetoothed/timestep_embedding.h"
++#include "../../../ninetoothed/utils.h"
++#include "../../../operator.h"
++#include "../../../tensor.h"
++
++
++namespace op::timestep_embedding::ninetoothed {
++
++class Descriptor final : public InfiniopDescriptor {
++public:
++    Descriptor(
++        infiniopHandle_t handle,
++        size_t num_timesteps,
++        size_t embedding_dim,
++        infiniDtype_t input_dtype) : InfiniopDescriptor{handle->device, handle->device_id},
++                                     num_timesteps_{num_timesteps},
++                                     embedding_dim_{embedding_dim},
++                                     input_dtype_{input_dtype} {}
++
++    ~Descriptor() = default;
++
++    static infiniStatus_t create(
++        infiniopHandle_t handle,
++        Descriptor **desc_ptr,
++        infiniopTensorDescriptor_t output_desc,
++        infiniopTensorDescriptor_t timestep_desc) {
++        if (timestep_desc->shape().size() != 1) {
++            return INFINI_STATUS_BAD_TENSOR_SHAPE;
++        }
++
++        if (output_desc->shape().size() != 2) {
++            return INFINI_STATUS_BAD_TENSOR_SHAPE;
++        }
++
++        if (output_desc->shape()[0] != timestep_desc->shape()[0]
++            || output_desc->shape()[1] == 0
++            || output_desc->shape()[1] % 2 != 0) {
++            return INFINI_STATUS_BAD_TENSOR_SHAPE;
++        }
++
++        if (output_desc->dtype() != INFINI_DTYPE_F32) {
++            return INFINI_STATUS_BAD_TENSOR_DTYPE;
++        }
++
++        CHECK_DTYPE(timestep_desc->dtype(),
++                    INFINI_DTYPE_F16, INFINI_DTYPE_BF16, INFINI_DTYPE_F32);
++
++        if (!output_desc->isContiguous() || !timestep_desc->isContiguous()) {
++            return INFINI_STATUS_BAD_TENSOR_STRIDES;
++        }
++
++        auto embedding_dim = output_desc->shape()[1];
++
++        if (embedding_dim != 16 && embedding_dim != 256) {
++            return INFINI_STATUS_NOT_IMPLEMENTED;
++        }
++
++        *desc_ptr = new Descriptor(
++            handle,
++            timestep_desc->shape()[0],
++            embedding_dim,
++            timestep_desc->dtype());
++
++        return INFINI_STATUS_SUCCESS;
++    }
++
++    infiniStatus_t calculate(
++        void *output,
++        const void *timestep,
++        float max_period,
++        void *stream) const {
++        if (max_period <= 0.0f) {
++            return INFINI_STATUS_BAD_PARAM;
++        }
++
++        if (num_timesteps_ == 0) {
++            return INFINI_STATUS_SUCCESS;
++        }
++
++        std::vector<::ninetoothed::Tensor<>::Size> output_shape{
++            static_cast<::ninetoothed::Tensor<>::Size>(num_timesteps_),
++            static_cast<::ninetoothed::Tensor<>::Size>(embedding_dim_)};
++
++        std::vector<::ninetoothed::Tensor<>::Stride> output_strides{
++            static_cast<::ninetoothed::Tensor<>::Stride>(embedding_dim_), 1};
++
++        // The timestep is shared by every element of a row, so it is described
++        // with the output shape and a zero stride along the embedding dimension.
++        std::vector<::ninetoothed::Tensor<>::Stride> timestep_strides{1, 0};
++
++        auto output_nt{::ninetoothed::Tensor<>{output, output_shape, output_strides}};
++        auto timestep_nt{::ninetoothed::Tensor<>{timestep, output_shape, timestep_strides}};
++
++        // The generated launcher reads this scalar as a double (the AOT trace
++        // types the Python float argument as fp64), so the holder must be double
++        // as well; a float holder made the kernel read 4 bytes of value plus 4
++        // bytes of padding and every output came out wrong.
++        ::ninetoothed::Tensor<double> log_max_period_nt{std::log(static_cast<double>(max_period))};
++
++        if (launch_timestep_embedding(stream,
++                                      output_nt,
++                                      timestep_nt,
++                                      log_max_period_nt,
++                                      static_cast<int>(embedding_dim_),
++                                      static_cast<int>(input_dtype_))) {
++            return INFINI_STATUS_NOT_IMPLEMENTED;
++        }
++
++        return INFINI_STATUS_SUCCESS;
++    }
++
++private:
++    size_t num_timesteps_;
++    size_t embedding_dim_;
++    infiniDtype_t input_dtype_;
++};
++
++} // namespace op::timestep_embedding::ninetoothed
++
++#endif // TIMESTEP_EMBEDDING_NINETOOTHED_H
+diff --git a/src/infiniop/ops/timestep_embedding/ninetoothed/timestep_embedding.py b/src/infiniop/ops/timestep_embedding/ninetoothed/timestep_embedding.py
+new file mode 100644
+index 00000000..d09b72a9
+--- /dev/null
++++ b/src/infiniop/ops/timestep_embedding/ninetoothed/timestep_embedding.py
+@@ -0,0 +1,61 @@
++import ninetoothed
++import ninetoothed.language as ntl
++from ninetoothed import Tensor
++
++
++# 说明：九齿的 AOT 通过 re-parse 函数源码来 trace kernel，闭包变量在生成的模块里不可见
++# （NameError: 'embedding_dim' is not defined）。因此这里为每个 embedding_dim 写一个
++# 常量已内联的 application，而不是用闭包捕获。
++def _application_16(output, timestep, log_max_period):
++    log_mp = ntl.cast(log_max_period, ntl.float32)
++
++    for i in range(1):
++        for j in range(16):
++            angle = ntl.cast(timestep[i, j], ntl.float32) * ntl.exp(
++                -log_mp * (j % 8) / 8
++            )
++
++            if j < 8:
++                output[i, j] = ntl.cos(angle)
++            else:
++                output[i, j] = ntl.sin(angle)
++
++
++def _application_256(output, timestep, log_max_period):
++    log_mp = ntl.cast(log_max_period, ntl.float32)
++
++    for i in range(1):
++        for j in range(256):
++            angle = ntl.cast(timestep[i, j], ntl.float32) * ntl.exp(
++                -log_mp * (j % 128) / 128
++            )
++
++            if j < 128:
++                output[i, j] = ntl.cos(angle)
++            else:
++                output[i, j] = ntl.sin(angle)
++
++
++_APPLICATIONS = {
++    16: _application_16,
++    256: _application_256,
++}
++
++
++def premake(embedding_dim, input_dtype=None):
++    application = _APPLICATIONS[embedding_dim]
++
++    def arrangement(output, timestep, log_max_period):
++        return (
++            output.tile((1, embedding_dim)),
++            timestep.tile((1, embedding_dim)),
++            log_max_period,
++        )
++
++    tensors = (
++        Tensor(2, dtype=ninetoothed.float32),
++        Tensor(2, dtype=input_dtype),
++        Tensor(0, dtype=ninetoothed.float32),
++    )
++
++    return arrangement, application, tensors
+diff --git a/src/infiniop/ops/timestep_embedding/operator.cc b/src/infiniop/ops/timestep_embedding/operator.cc
+index 1b1f9f2c..7a14d13e 100644
+--- a/src/infiniop/ops/timestep_embedding/operator.cc
++++ b/src/infiniop/ops/timestep_embedding/operator.cc
+@@ -6,6 +6,10 @@
+ #include "nvidia/timestep_embedding_nvidia.cuh"
+ #endif
+ 
++#if defined(ENABLE_HYGON_API) && defined(ENABLE_NINETOOTHED) && defined(INFINIOP_HYGON_NINETOOTHED_TIMESTEP_EMBEDDING)
++#include "ninetoothed/timestep_embedding.h"
++#endif
++
+ __INFINI_C infiniStatus_t infiniopCreateTimestepEmbeddingDescriptor(
+     infiniopHandle_t handle,
+     infiniopTimestepEmbeddingDescriptor_t *desc_ptr,
+@@ -26,7 +30,11 @@ __INFINI_C infiniStatus_t infiniopCreateTimestepEmbeddingDescriptor(
+         CREATE(INFINI_DEVICE_NVIDIA, nvidia);
+ #endif
+ #ifdef ENABLE_HYGON_API
++#if defined(ENABLE_NINETOOTHED) && defined(INFINIOP_HYGON_NINETOOTHED_TIMESTEP_EMBEDDING)
++        CREATE(INFINI_DEVICE_HYGON, ninetoothed);
++#else
+         CREATE(INFINI_DEVICE_HYGON, nvidia);
++#endif
+ #endif
+     default:
+         return INFINI_STATUS_DEVICE_TYPE_NOT_SUPPORTED;
+@@ -53,7 +61,11 @@ __INFINI_C infiniStatus_t infiniopTimestepEmbedding(
+         CALCULATE(INFINI_DEVICE_NVIDIA, nvidia);
+ #endif
+ #ifdef ENABLE_HYGON_API
++#if defined(ENABLE_NINETOOTHED) && defined(INFINIOP_HYGON_NINETOOTHED_TIMESTEP_EMBEDDING)
++        CALCULATE(INFINI_DEVICE_HYGON, ninetoothed);
++#else
+         CALCULATE(INFINI_DEVICE_HYGON, nvidia);
++#endif
+ #endif
+     default:
+         return INFINI_STATUS_DEVICE_TYPE_NOT_SUPPORTED;
+@@ -76,7 +88,11 @@ __INFINI_C infiniStatus_t infiniopDestroyTimestepEmbeddingDescriptor(
+         DESTROY(INFINI_DEVICE_NVIDIA, nvidia);
+ #endif
+ #ifdef ENABLE_HYGON_API
++#if defined(ENABLE_NINETOOTHED) && defined(INFINIOP_HYGON_NINETOOTHED_TIMESTEP_EMBEDDING)
++        DESTROY(INFINI_DEVICE_HYGON, ninetoothed);
++#else
+         DESTROY(INFINI_DEVICE_HYGON, nvidia);
++#endif
+ #endif
+     default:
+         return INFINI_STATUS_DEVICE_TYPE_NOT_SUPPORTED;
+diff --git a/xmake/hygon.lua b/xmake/hygon.lua
+index ba06ae97..a40c7fb7 100644
+--- a/xmake/hygon.lua
++++ b/xmake/hygon.lua
+@@ -1,16 +1,30 @@
+ local dtk_root = os.getenv("DTK_ROOT") or "/opt/dtk"
+ 
+ local function hygon_cuda_roots()
++    -- Always keep the DTK siblings in the search list: the configured tree may
++    -- lack cuda.h/libcuda while a sibling (e.g. cuda-12) provides them.
++    local roots = {}
+     local configured = get_config("cuda") or os.getenv("HYGON_CUDA_HOME")
+     if configured and configured ~= "" then
+-        return {configured}
++        table.insert(roots, configured)
+     end
+-    return {
++    for _, candidate in ipairs({
+         path.join(dtk_root, "cuda", "cuda"),
+         path.join(dtk_root, "cuda", "cuda-12"),
+         path.join(dtk_root, "cuda", "cuda-11"),
+         path.join(dtk_root, "cuda"),
+-    }
++    }) do
++        local duplicate = false
++        for _, existing in ipairs(roots) do
++            if existing == candidate then
++                duplicate = true
++            end
++        end
++        if not duplicate then
++            table.insert(roots, candidate)
++        end
++    end
++    return roots
+ end
+ 
+ local function resolve_hygon_cuda_tool(tool)
+@@ -156,7 +170,15 @@ target("infiniop-hygon")
+     remove_files("../src/infiniop/ops/histc/nvidia/*.cu")
+     remove_files("../src/infiniop/ops/quant/per_tensor_quant_int8/nvidia/*.cu")
+     if has_config("ninetoothed") then
+-        add_files("../build/ninetoothed/*.c", "../build/ninetoothed/*.cpp", {cxxflags = {"-Wno-return-type"}})
++        add_files("../build/ninetoothed/*.c", "../build/ninetoothed/*.cpp", {cxflags = {"-Wno-return-type"}, cxxflags = {"-Wno-return-type"}})
++        -- NineToothed AOT launchers use the CUDA driver API (DTK ships a compatible libcuda).
++        add_links("cuda")
++        for _, cuda_root in ipairs(hygon_cuda_roots()) do
++            local driver_lib_dir = path.join(cuda_root, "targets", "x86_64-linux", "lib")
++            if os.isfile(path.join(driver_lib_dir, "libcuda.so")) then
++                add_ldflags("-Wl,-rpath," .. driver_lib_dir, {force = true})
++            end
++        end
+     end
+ target_end()
+ 
