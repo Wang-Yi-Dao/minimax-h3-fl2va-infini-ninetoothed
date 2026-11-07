@@ -1,11 +1,12 @@
 #!/bin/bash
-# nn28: 8-card non-legacy FL2VA with a fail-fast watchdog (kills the run the
-# moment every rank dies) + optional official compare.  usage: nn28.sh [steps] [budget]
+# run_tp8_fl2va: TP8 non-legacy FL2VA + official compare.
+# Fixed HIP_LAUNCH_BLOCKING=1 (BLK default 1) so that the 8 ranks execute in a
+# deterministic order. usage: run_tp8_fl2va.sh [steps] [budget]
 set +u
 STEPS=${1:-${STEPS:-2}}
 BUDGET=${2:-${BUDGET:-1650}}
 T_START=$(date +%s)
-echo "=== nn28 start $(date -u +%FT%T) steps=$STEPS budget=$BUDGET"
+echo "=== run_tp8_fl2va start $(date -u +%FT%T) steps=$STEPS budget=$BUDGET"
 AFS=${IFAB_AFS_HOME:-$HOME}; H=$AFS/minimax_h3; B=$H/b1
 SH=/public/home/aclsylqidf/shared/MiniMax-H3/diffusers
 PROJ=$(cd "$(dirname "$0")" && pwd)
@@ -16,11 +17,11 @@ cd "$W" || exit 12
 TS=$(date -u +%m%d_%H%M%S)
 echo "GPU_COUNT=$(python3 -c 'import torch;print(torch.cuda.device_count())' 2>/dev/null)"
 echo "--- setup (cap 900s)"
-timeout 900 python3 -u "$PROJ/setup.py" "$W" "$AFS" "$SH" > "$W/logs/nn28_setup.log" 2>&1
+timeout 900 python3 -u "$PROJ/setup.py" "$W" "$AFS" "$SH" > "$W/logs/run_tp8_fl2va_setup.log" 2>&1
 SE=$?
 echo "SETUP_EXIT=$SE setup_secs=$(( $(date +%s)-T_START ))"
-grep -E "^\[|STEP_FAIL|SETUP_OK|Traceback" "$W/logs/nn28_setup.log" | tail -10 | cut -c1-190
-[ "$SE" = "0" ] || { echo "SETUP_FAILED"; tail -10 "$W/logs/nn28_setup.log" | cut -c1-190; echo "=== nn28 done $(date -u +%FT%T)"; exit 0; }
+grep -E "^\[|STEP_FAIL|SETUP_OK|Traceback" "$W/logs/run_tp8_setup.log" | tail -10 | cut -c1-190
+[ "$SE" = "0" ] || { echo "SETUP_FAILED"; tail -10 "$W/logs/run_tp8_setup.log" | cut -c1-190; echo "=== run_tp8_fl2va done $(date -u +%FT%T)"; exit 0; }
 R="$W/InfiniCore/build/linux/x86_64/release"
 L="$W/InfiniCore/python/infinicore/lib"
 mkdir -p "$L"
@@ -66,12 +67,14 @@ if [ -f "$PRE" ]; then
   export LD_PRELOAD="$PRE:${LD_PRELOAD:-}"
   echo "PRELOAD=$LD_PRELOAD"
 fi
+BLK=${BLK:-1}
+if [ "$BLK" = "1" ]; then export HIP_LAUNCH_BLOCKING=1; echo "LAUNCH_BLOCKING=1"; else echo "LAUNCH_BLOCKING=0"; fi
 export HF_HOME="$W/hf" HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
 export FA_SO_PATH="$(cat "$W/fa_so_path.txt" 2>/dev/null)"
 export PYTHONFAULTHANDLER=1
 TP_IDS=${TP_IDS:-0,1,2,3,4,5,6,7}
 cd "$W/InfiniLM" || exit 13
-LOG="$W/logs/nn28_run.log"
+LOG="$W/logs/run_tp8_fl2va_run.log"
 rm -f "$LOG"
 LEFT=$(( BUDGET - ( $(date +%s) - T_START ) ))
 echo "RUN_BUDGET=${LEFT}s"
@@ -95,7 +98,7 @@ while kill -0 $PY 2>/dev/null; do
   if grep -q -m1 -E "RankWorker stopped during run|Not Implemented|out of memory|Error in block" "$LOG" 2>/dev/null; then
     echo "FAIL_MARKER detected at $(date -u +%T)"
     tr '\r' '\n' < "$LOG" | grep -v Materializing | grep -n -i -E "error|not implemented|traceback|rankworker|exception during forward" | cut -c1-300 | head -10
-    cp -f "$LOG" "$H/logs/nn28_${TS}_fail.log" 2>/dev/null
+    cp -f "$LOG" "$H/logs/run_tp8_fl2va_${TS}_fail.log" 2>/dev/null
     kill -9 $PY 2>/dev/null
     FAILED=1
     break
@@ -106,14 +109,14 @@ RC=$?
 RUN_S=$(( $(date +%s)-T0 ))
 echo "RUN_RC=$RC failed=$FAILED run_secs=$RUN_S steps=$STEPS sec_per_step=$(python3 -c "print(round($RUN_S/max(1,$STEPS),2))")"
 tr '\r' '\n' < "$LOG" | grep -v Materializing | grep -E "Error|error|Traceback|it/s|s/it" | tail -12 | cut -c1-200
-cp -f "$LOG" "$H/logs/nn28_${TS}_run.log" 2>/dev/null
+cp -f "$LOG" "$H/logs/run_tp8_${TS}_run.log" 2>/dev/null
 OUT="$W/out/nl_$STEPS.mp4"
 if [ -f "$OUT" ]; then
   cp -f "$OUT" "$H/output2/nl${STEPS}_${TS}.mp4"
   echo "GET_MP4 bytes=$(stat -c%s "$OUT") path=$H/output2/nl${STEPS}_${TS}.mp4"
 else
   echo "NO_MP4"
-  echo "=== nn28 done $(date -u +%FT%T)"
+  echo "=== run_tp8 done $(date -u +%FT%T)"
   exit 0
 fi
 export PYTHONPATH="$H/pylibs_extra:${PYTHONPATH:-}"
@@ -147,12 +150,12 @@ if [ -n "$REF" ] && [ "$LEFT2" -gt 60 ]; then
   mkdir -p "$W/cmpout"
   timeout $LEFT2 python3 -u "$H/InfiniLM/examples/minimax_h3_compare.py" \
     --tasks fl2va --output-dir "$W/cmpout" --model-path "$W" \
-    --reference-fl2va-video "$REF" --infinilm-fl2va-video "$OUT" 2>&1 | tee "$W/logs/nn28_cmp.log" | tail -25
+    --reference-fl2va-video "$REF" --infinilm-fl2va-video "$OUT" 2>&1 | tee "$W/logs/run_tp8_fl2va_cmp.log" | tail -25
   echo "CMP_RC=${PIPESTATUS[0]}"
-  grep -E "Size:|Length:|Average SSIM:" "$W/logs/nn28_cmp.log" | cut -c1-190
-  cp -f "$W/logs/nn28_cmp.log" "$H/logs/nn28_${TS}_cmp.log" 2>/dev/null
+  grep -E "Size:|Length:|Average SSIM:" "$W/logs/run_tp8_cmp.log" | cut -c1-190
+  cp -f "$W/logs/run_tp8_cmp.log" "$H/logs/run_tp8_${TS}_cmp.log" 2>/dev/null
 else
   echo "SKIP_CMP left=${LEFT2}s ref=${REF:-none}"
 fi
 echo "TOTAL_SECS=$(( $(date +%s)-T_START ))"
-echo "=== nn28 done $(date -u +%FT%T)"
+echo "=== run_tp8 done $(date -u +%FT%T)"

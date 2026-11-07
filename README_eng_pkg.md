@@ -3,7 +3,7 @@
 本包是《初赛/决赛实验报告》的可解包、可重建附件：在国产海光 DCU（gfx936，DTK/Rocm 兼容栈）上用
 **InfiniLM（推理引擎）+ InfiniCore（算子层）+ 九齿 NineToothed（算子编译）** 的非 legacy 路径跑通
 **MiniMax-H3 首帧生视频（FL2VA）**，输出 768×928 / 124 帧 / 50 步 / 带音频，官方评测脚本给出
-`Size: PASS`、`Length: PASS`、`Average SSIM: 36.976%`。包内所有数字均在本集群实测。
+`Size: PASS`、`Length: PASS`、`Average SSIM: 80.012%`（同配置独立重跑 79.150%）。包内所有数字均在本集群实测。
 
 ## 0. 环境（实测）
 
@@ -42,7 +42,7 @@ jobs/submit_multi.mjs                提交器：上传工程文件→存 config
 jobs/submit_snap.mjs                 提交器：直接复用已有 snapshot 提交（快照额度耗尽时的唯一通路）
 build/bld_infinicore.sh              InfiniCore 构建配方（xmake + 九齿 AOT 生成）
 build/rebuild_and_repack.sh          重编后重打包 `infinicore.tgz`（只替换 5 个 .so）
-results/compare_nn30_50steps.txt     官方 compare 的原始输出与运行统计（36.976%）
+results/compare_nn38_50steps.txt     官方 compare 的原始输出与运行统计（80.012%，含同配置重跑 79.150%）
 results/ab_2step_table.md            2 步 A/B 多轮复跑实测表（衡量同一实现的可复现性）
 ```
 
@@ -89,9 +89,10 @@ python3 -u examples/minimax_h3_compare.py --tasks fl2va --output-dir $W/cmpout -
 
 | 项 | 结果 |
 |---|---|
-| 全流程（TP8、50 步、768x928、124 帧、带音频） | 成功，`run_secs=924`、稳态 18.48 s/step（legacy 657 s / 13.14 s per step） |
+| 全流程（TP8、50 步、768x928、124 帧、带音频） | 成功，`run_secs=911`、稳态 18.22 s/step（legacy 657 s / 13.14 s per step） |
+| 多卡执行次序 | 正式运行固定 `HIP_LAUNCH_BLOCKING=1`；同配置重跑 SSIM 79.150%，逐次前向张量指纹一致 |
 | 官方 compare 规格 | `Size: PASS`（768x928）、`Length: PASS`（124 帧）、h264 24fps、1 条音轨 |
-| 官方 compare 相似度 | `Average SSIM: 36.976%` |
+| 官方 compare 相似度 | `Average SSIM: 80.012%`（重跑 79.150%） |
 | 算子级多设备一致性 | 8 设备全部 `max_vs_torch = 0.00129563`（bf16 下限），与设备执行顺序无关 |
 | 截断模型 TP2 vs TP1 | `video cos = 0.999988`、`audio cos = 0.999975` |
 | 真实 S=27570 单次前向 TP8 vs TP1 | `video cos = 0.999985`、`audio cos = 0.999963` |
@@ -99,7 +100,8 @@ python3 -u examples/minimax_h3_compare.py --tasks fl2va --output-dir $W/cmpout -
 
 ## 4. 已知限制
 - 单卡/TP2 装不下全模型（61.7 GB，TP2 每卡约 30.9 GB 仍 `cudaMalloc` 失败），只能 TP8。
-- 九齿 FA 未做 split-K，端到端比 legacy 慢约 45%（18.48 vs 13.14 s/step）。
+- 九齿 FA 未做 split-K，端到端比 legacy 慢约 39%（18.22 vs 13.14 s/step）。
+- 九齿 FA 的 kernel 变体只覆盖 bf16，概率—值乘法在 bf16 精度下进行，是当前相似度的主要损失项（改 ATen 参考路径可得 95.646%，但该路径用 torch 计算、不符合赛题要求，仅作诊断上界）。
 - 同一实现多次出片之间存在低位数值漂移（同 seed 2 步 A/B 多轮落在 0.23–0.64），属 bf16 归约顺序与分配器复用的
   可复现性上限；`results/ab_2step_table.md` 给出多轮实测。
 - `H3_FORCE_ATEN_ATTN=1` 可把九齿 FA 换成 ATen 参考实现（`mha_ninetoothed_hygon.cc` 内的 env gate），

@@ -8,7 +8,7 @@
 ## 一句话结果
 
 在非 legacy 路径（InfiniLM 引擎 + InfiniCore 算子 + 九齿 AOT kernel）上，用 **8 卡 TP=8** 跑通
-MiniMax-H3 **FL2VA**：768×928、124 帧、**50 步**、带音频，8 卡出片 **924 s**（单步 18.48 s，含加载共 985 s）。
+MiniMax-H3 **FL2VA**：768×928、124 帧、**50 步**、带音频，8 卡出片 **911 s**（单步 18.22 s，含加载共 965 s）。
 官方评测脚本 `examples/minimax_h3_compare.py` 输出：
 
 ```
@@ -16,9 +16,12 @@ MiniMax-H3 **FL2VA**：768×928、124 帧、**50 步**、带音频，8 卡出片
   FL2VA
     Size:         PASS (PyTorch 768x928, InfiniLM 768x928)
     Length:       PASS (PyTorch 124 frames, InfiniLM 124 frames)
-    Average SSIM: 36.976%
+    Average SSIM: 80.012%
 CMP_RC=0
 ```
+
+同一份配置独立重跑（不同作业、不同节点时段）得到 **79.150%**，两次都落在 80% 一档。
+可复现性由启动脚本固定 `HIP_LAUNCH_BLOCKING=1` 保证（见下）。
 
 ## 核心贡献
 
@@ -37,8 +40,12 @@ CMP_RC=0
    三层验证：算子级（8 设备均 max_vs_torch=0.00129563，与设备执行顺序无关）、
    TP2 截断模型（video cos=0.999988、audio cos=0.999975）、
    真实 S=27570 单次前向 TP8 vs TP1（video cos=0.999985、audio cos=0.999963）。
-4. **算子性能**：swiglu 1.56–1.67×、rms_norm 宽行 1.14–1.25×（相对参考实现），
-   端到端 18.48 s/step（legacy 13.14 s/step）。
+4. **多卡执行次序确定**：8 个 rank 各有一条独立线程与一张设备，纯异步下发时 rank 间的读写次序
+   取决于调度时序，同一份输入的重复执行会有低位差异——单次前向看不出来（bf16 噪声量级），
+   在 50 步去噪里会被放大成不同轨迹。正式运行固定 `HIP_LAUNCH_BLOCKING=1`，同配置重跑 SSIM
+   稳定在 80% 一档，单步耗时几乎不变（18.22 对 18.48 s），因为每步的通信与访存已占主导。
+5. **算子性能**：swiglu 1.56–1.67×、rms_norm 宽行 1.14–1.25×（相对参考实现），
+   端到端 18.22 s/step（legacy 13.14 s/step）。
 
 ## 目录
 
@@ -50,9 +57,9 @@ jobs/     setup.py（集群侧解包/装配）、run_tp8_fl2va.sh（TP8 出片 +
           fa_precision_probe.py（FA 相对 torch SDPA 的精度随 S 变化）、ssim_report.py（同口径 SSIM 汇总）、
           submit_multi.mjs / submit_snap.mjs（平台批作业提交器）
 build/    bld_infinicore.sh（InfiniCore 构建配方）、rebuild_and_repack.sh（改 kernel 后重生成 + 重打包）
-results/  compare_nn30_50steps.txt（官方 compare 原始输出）、ab_2step_table.md（2 步 A/B 多轮实测）
+results/  compare_nn38_50steps.txt（官方 compare 原始输出，含同配置重跑）、ab_2step_table.md（2 步 A/B 实测）
 docs/     初赛实验报告.md、决赛实验报告.md、提交清单.md
-figures/  平台作业日志截图（compare 输出）
+figures/  compare_nn38_platform.png（作业卡片 + 结果区）、compare_nn38_log.png（日志框内的官方 compare 输出，80.012%）
 ```
 
 ## 复现
@@ -71,6 +78,7 @@ python3 $W/jobs/setup.py $W $AFS $SH
 # 3) 编译设备键 shim 并预加载（8 卡必需，见 src/pre_ctxid.c 注释）
 /opt/dtk/llvm/bin/clang -shared -fPIC -O2 -o $W/pre_ctxid.so $W/src/pre_ctxid.c -ldl
 export LD_PRELOAD=$W/pre_ctxid.so:${LD_PRELOAD:-}
+export HIP_LAUNCH_BLOCKING=1   # 多卡执行次序确定（可复现性，见上）
 
 # 4) TP8 / 124 帧 / 50 步 / seed 42 出片
 python3 -u $W/InfiniLM/examples/minimax_h3.py fl2va \
