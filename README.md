@@ -101,6 +101,36 @@ PYTHONPATH="$W/pylibs:$HOME/pylibs_extra:$PYTHONPATH" python3 -u \
 
 批作业平台上的等价封装见 `jobs/run_tp8_fl2va.sh`（含 fail-fast 看门狗与日志归档）。
 
+## 从源码重建（第三方验证）
+
+本仓库不只给结果，也给出**能重建那一份 InfiniCore 的完整输入**：`build/` 与 `src/` 下三个 tar 包，
+全部是源码（无二进制产物），sha256 见 `src/SHA256SUMS`。
+
+| 输入 | 内容 | 大小 / sha256 前缀 |
+|---|---|---|
+| `src/InfiniCore-snapshot-mit.tar.gz` | 上游 InfiniCore 快照（MIT，含 LICENSE） | 3,759,864 B / `620d40e2` |
+| `src/overlay.tar.gz` | 我们改动的 9 个源文件，根为 `ic/` | 19,576 B / `e66b78c2` |
+| `src/kernels_deployed.tgz` | 出片所用库的九齿 kernel 源码 `ic/build/ninetoothed/`（106 文件） | 2,457,374 B / `fbf98247` |
+
+```bash
+# 1) 取三个输入，按 build/README.md 设好 DTK / wheels / xmake / pybind11
+export IC_TGZ=$PWD/src/InfiniCore-snapshot-mit.tar.gz
+export OVL_TGZ=$PWD/src/overlay.tar.gz
+export CRB_KERNELS_TGZ=$PWD/src/kernels_deployed.tgz
+export DTK=/opt/dtk J=32 ARCH=gfx936 PHASE=all
+bash build/from_scratch.sh        # 6 步：shim → py 补丁 → kernel → dispatcher → 生成的源码修正 → xmake
+
+# 2) 用重建出的 5 个 so 覆盖运行时，再跑 50 步 + 官方 compare
+export CRB_LIBS=<上一步的 build-work>/ic/build/linux/x86_64/release
+bash jobs/run_tp8_fl2va.sh 50 1600
+```
+
+实测（8 卡，干净工作区，仅用上面三个输入）：构建 `BUILD_EXIT=0`、5 个 so 全部产出
+（`libinfiniop.so` 32,407,664 B、`libinfinicore_cpp_api.so` 13,297,376 B、
+`_infinicore.cpython-311-x86_64-linux-gnu.so` 1,612,400 B），50 步 15.75 s/step，
+官方 compare `Size PASS / Length PASS`,**Average SSIM 79.712%**（`CMP_RC=0`），
+与本仓库正式成绩 80.012% 同一档。细节与踩坑见 `build/README.md`。
+
 ## 已知限制 / 未完成
 
 - **运行间可复现性**：同一 seed/参数下多次 2 步 A/B 的 SSIM 落在 0.23–0.64（legacy 多次恒为 0.3995），

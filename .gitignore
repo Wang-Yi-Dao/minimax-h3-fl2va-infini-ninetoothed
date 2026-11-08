@@ -22,6 +22,11 @@ alloc_*.txt
 *.tar.gz
 *.zip
 
+# 例外：第三方从源码重建所需的三个输入（全是源码，见 build/README.md 与 src/SHA256SUMS）
+!src/InfiniCore-snapshot-mit.tar.gz
+!src/overlay.tar.gz
+!src/kernels_deployed.tgz
+
 # Python / Node
 __pycache__/
 *.pyc
