@@ -1,6 +1,6 @@
 # MiniMax-H3 FL2VA · InfiniLM + InfiniCore + 九齿 海光 DCU 工程包
 
-本包是《初赛/决赛实验报告》的可解包、可重建附件：在国产海光 DCU（gfx936，DTK/Rocm 兼容栈）上用
+本包是《初赛实验报告》的可解包、可重建附件：在国产海光 DCU（gfx936，DTK/Rocm 兼容栈）上用
 **InfiniLM（推理引擎）+ InfiniCore（算子层）+ 九齿 NineToothed（算子编译）** 的非 legacy 路径跑通
 **MiniMax-H3 首帧生视频（FL2VA）**，输出 768×928 / 124 帧 / 50 步 / 带音频，官方评测脚本给出
 `Size: PASS`、`Length: PASS`、`Average SSIM: 80.012%`（同配置独立重跑 79.150%）。包内所有数字均在本集群实测。
