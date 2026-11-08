@@ -1,0 +1,48 @@
+# 从源码重建（第三方验证）实测记录
+
+作业：crb-pub（平台批作业 8 卡，job id 947132d5ac154f9481f69193fede79b7，TOTAL_SECS=960）
+输入：仅本仓库 src/ 下三个 tar 包（sha256 见 src/SHA256SUMS），脚本 build/from_scratch.sh +
+      build/rebuild_and_validate.sh，未使用任何本项目产出的二进制。
+工作区：作业本地 tmpfs（干净目录），未复用任何历史构建树。
+
+## A. 输入校验
+
+SHA_OK snapshot.tgz   620d40e299ed25d154903d09242b5b1dc5ec37f7c971a7ed116902217a029fdd
+SHA_OK overlay.tar.gz e66b78c22385b4ae5d6c80c3ce28c9db72c1ff5159f0c26f5094fd781e5ce754
+SHA_OK kernels.tgz    fbf982472e7f195038c6f4225448d6b7c82a358f2092c363278c685423e821cc
+KERNEL_ENTRIES=102   （另有 flash_attention.c / flash_attention.h，共 106 个文件）
+
+## B. 构建
+
+BUILD_EXIT=0
+FRESH_SO_COUNT=5
+FRESH_SO   1612400  _infinicore.cpython-311-x86_64-linux-gnu.so
+FRESH_SO     52104  libinfiniccl.so
+FRESH_SO  13297376  libinfinicore_cpp_api.so
+FRESH_SO  30752880  libinfiniop.so
+FRESH_SO     48184  libinfinirt.so
+
+## C. 出片与官方评测（用上面 5 个 so）
+
+RUN_RC=0 failed=0 run_secs=910 steps=50 sec_per_step=18.2
+GET_MP4 bytes=1619081 path=$HOME/minimax_h3/output2/nl50_1108_180422.mp4
+
+[result] MiniMax-H3 video comparison
+
+  FL2VA
+    Size:         PASS (PyTorch 768x928, InfiniLM 768x928)
+    Length:       PASS (PyTorch 124 frames, InfiniLM 124 frames)
+    Average SSIM: 79.907%
+CMP_RC=0
+
+## 对照
+
+正式成绩（同一 8 卡配置、同一 50 步口径）：Average SSIM 80.012%，同配置重跑 79.150%。
+本次从源码重建：79.907%。三次都在 79–81% 一档。
+
+## 说明
+
+- 九齿 kernel 必须是 src/kernels_deployed.tgz 这一份（与出片所用库同源）。早期曾用另一份
+  旧 kernel 包，重建出的库在算子级 cos 只有 0.9379、端到端只有 9.352%——差别不在脚本，
+  而在 kernel 变体的编译产物（HSACO 尺寸 54464 对 38728 字节）。
+- 生成的 dispatcher（flash_attention.c/.h）由 build/gen_dispatch.py 现场重算，与部署树逐字节比对过。

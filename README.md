@@ -61,7 +61,8 @@ jobs/     setup.py（集群侧解包/装配）、run_tp8_fl2va.sh（TP8 出片 +
           fa_precision_probe.py（FA 相对 torch SDPA 的精度随 S 变化）、ssim_report.py（同口径 SSIM 汇总）、
           submit_multi.mjs / submit_snap.mjs（平台批作业提交器）
 build/    bld_infinicore.sh（InfiniCore 构建配方）、rebuild_and_repack.sh（改 kernel 后重生成 + 重打包）
-results/  compare_nn38_50steps.txt（官方 compare 原始输出，含同配置重跑）、ab_2step_table.md（2 步 A/B 实测）
+results/  compare_nn38_50steps.txt（官方 compare 原始输出，含同配置重跑）、ab_2step_table.md（2 步 A/B 实测）、
+          rebuild_check.txt（第三方从源码重建的实测记录：79.907%）
 docs/     初赛实验报告.md、提交清单.md
 figures/  compare_nn38_platform.png（作业卡片 + 结果区）、compare_nn38_log.png（日志框内的官方 compare 输出，80.012%）、
           video_frames_nl50.png（成片第 1/61/124 帧抽帧对照）
@@ -125,11 +126,12 @@ export CRB_LIBS=<上一步的 build-work>/ic/build/linux/x86_64/release
 bash jobs/run_tp8_fl2va.sh 50 1600
 ```
 
-实测（8 卡，干净工作区，仅用上面三个输入）：构建 `BUILD_EXIT=0`、5 个 so 全部产出
-（`libinfiniop.so` 32,407,664 B、`libinfinicore_cpp_api.so` 13,297,376 B、
-`_infinicore.cpython-311-x86_64-linux-gnu.so` 1,612,400 B），50 步 15.75 s/step，
-官方 compare `Size PASS / Length PASS`,**Average SSIM 79.712%**（`CMP_RC=0`），
-与本仓库正式成绩 80.012% 同一档。细节与踩坑见 `build/README.md`。
+实测（8 卡，干净工作区，只喂上面三个输入，`build/rebuild_and_validate.sh` 一个作业跑完）：
+三份 sha256 全部 `SHA_OK`；构建 `BUILD_EXIT=0`，5 个 so 全部产出
+（`libinfiniop.so` 30,752,880 B、`libinfinicore_cpp_api.so` 13,297,376 B、
+`_infinicore.cpython-311-x86_64-linux-gnu.so` 1,612,400 B）；50 步 18.2 s/step（910 s）；
+官方 compare `Size PASS / Length PASS`、**Average SSIM 79.907%**（`CMP_RC=0`）；
+构建 + 出片 + 评测共 960 s。与本仓库正式成绩 80.012% 同一档，细节与踩坑见 `build/README.md`。
 
 ## 已知限制 / 未完成
 

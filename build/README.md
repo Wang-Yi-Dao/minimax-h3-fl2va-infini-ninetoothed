@@ -129,12 +129,18 @@ five libraries in a fresh local scratch tree, then runs the published 50-step
 FL2VA pipeline plus `examples/minimax_h3_compare.py` with those libraries.
 
 ```
+check:   SHA_OK snapshot.tgz / SHA_OK overlay.tar.gz / SHA_OK kernels.tgz
 build:   BUILD_EXIT=0, FRESH_SO_COUNT=5
-         libinfiniop.so 32,407,664 B   libinfinicore_cpp_api.so 13,297,376 B
+         libinfiniop.so 30,752,880 B    libinfinicore_cpp_api.so 13,297,376 B
+         libinfinirt.so 48,184 B        libinfiniccl.so 52,104 B
          _infinicore.cpython-311-x86_64-linux-gnu.so 1,612,400 B
-run:     RUN_RC=0, 50 steps, 15.75 s/step, out 1,619,982 B
-compare: Size PASS / Length PASS / Average SSIM 79.712% (CMP_RC=0)
+run:     RUN_RC=0, 50 steps, 18.2 s/step (910 s), out 1,619,081 B
+compare: Size PASS / Length PASS / Average SSIM 79.907% (CMP_RC=0)
+total:   960 s of wall clock for build + run + compare on 8 cards
 ```
+
+This is the same 79-81% band as the released run (80.012%), from inputs that
+contain no binary produced by this project.
 
 ## Why the scratch directory matters
 
