@@ -57,11 +57,12 @@ CMP_RC=0
 src/      pre_ctxid.c（设备键 shim）、kb7.py（源码级实现）、mha_ninetoothed_hygon.cc（HYGON FA 后端）、
           infinicore_ninetoothed_hygon.patch（为 HYGON 打开九齿的整套上游补丁）
 jobs/     setup.py（集群侧解包/装配）、run_tp8_fl2va.sh（TP8 出片 + 官方 compare）、
-          ab_native_vs_legacy.sh（同 seed 2 步 A/B）、ab_aten_fa_probe.sh（FA vs ATen 对照）、
+          ab_native_vs_legacy.sh（同 seed 2 步 A/B）、
           fa_precision_probe.py（FA 相对 torch SDPA 的精度随 S 变化）、ssim_report.py（同口径 SSIM 汇总）、
           submit_multi.mjs / submit_snap.mjs（平台批作业提交器）
 build/    bld_infinicore.sh（InfiniCore 构建配方）、rebuild_and_repack.sh（改 kernel 后重生成 + 重打包）
 results/  compare_nn38_50steps.txt（官方 compare 原始输出，含同配置重跑）、ab_2step_table.md（2 步 A/B 实测）、
+          compare_nn40_freshlibs.txt（删除 ATen 通道后重编的库的官方 compare：79.462%，附同日对照跑 79.874%）、
           rebuild_check.txt（第三方从源码重建的实测记录：79.907%）
 docs/     初赛实验报告.md、提交清单.md
 figures/  compare_nn38_platform.png（作业卡片 + 结果区）、compare_nn38_log.png（日志框内的官方 compare 输出，80.012%）、
@@ -110,7 +111,7 @@ PYTHONPATH="$W/pylibs:$HOME/pylibs_extra:$PYTHONPATH" python3 -u \
 | 输入 | 内容 | 大小 / sha256 前缀 |
 |---|---|---|
 | `src/InfiniCore-snapshot-mit.tar.gz` | 上游 InfiniCore 快照（MIT，含 LICENSE） | 3,759,864 B / `620d40e2` |
-| `src/overlay.tar.gz` | 我们改动的 9 个源文件，根为 `ic/` | 19,576 B / `e66b78c2` |
+| `src/overlay.tar.gz` | 我们改动的 9 个源文件，根为 `ic/` | 19,254 B / `f1f28f73` |
 | `src/kernels_deployed.tgz` | 出片所用库的九齿 kernel 源码 `ic/build/ninetoothed/`（106 文件） | 2,457,374 B / `fbf98247` |
 
 ```bash

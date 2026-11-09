@@ -44,6 +44,54 @@ src/infinicore/ops/multi_head_attention/hygon_nt/mha_ninetoothed_hygon.cc   (new
 * pybind11 3.1.0 headers, python 3.11 headers and library
 * ~8 GB of scratch space; the AOT step wants a *local* scratch directory (see below)
 
+## Getting the build dependencies
+
+None of the five items below is produced by this project — they are public or
+vendor artefacts, pinned to the exact versions the released library was built
+with.  Run this once; afterwards `WHEELS`, `XMAKE_TGZ` and `PYBIND11_ROOT`
+point at what it produced.
+
+```bash
+# 1) the three wheels the AOT step imports (python 3.11, x86_64)
+mkdir -p wheels
+pip download ninetoothed==0.26.0 numpy==1.26.4 \
+  --only-binary=:all: --python-version 311 --platform manylinux2014_x86_64 \
+  -d wheels -i https://pypi.org/simple
+
+#    triton is NOT on pypi.org.  The build needs the Hygon-patched wheel, whose
+#    local version tag (+das.opt1.dtk2604.torch290) exists only on the DTK mirror:
+#    stock triton has no hip:gfx936 backend, so step 3 could not emit a kernel.
+pip download "triton==3.5.1+das.opt1.dtk2604.torch290" \
+  --only-binary=:all: --python-version 311 --platform manylinux_2_28_x86_64 \
+  -d wheels -i https://pypi.sourcefind.cn/release/dtk/simple/ \
+  --trusted-host pypi.sourcefind.cn
+
+# 2) xmake 3.1.2 (GitHub release asset; -L is required, the URL redirects)
+curl -L -o xmake-3.1.2.tar.gz \
+  https://github.com/xmake-io/xmake/releases/download/v3.1.2/xmake-v3.1.2.tar.gz
+
+# 3) pybind11 3.1.0 headers — the wheel is pure headers, unzipping *is* installing
+pip download pybind11==3.1.0 --no-deps -d /tmp/pb -i https://pypi.org/simple
+mkdir -p /opt/pybind11-3.1.0 && unzip -q /tmp/pb/pybind11-3.1.0-*.whl -d /opt/pybind11-3.1.0
+```
+
+then
+
+```bash
+export WHEELS=$PWD/wheels
+export XMAKE_TGZ=$PWD/xmake-3.1.2.tar.gz
+export PYBIND11_ROOT=/opt/pybind11-3.1.0
+```
+
+Two practical notes:
+
+* `pip download` resolves the wheel tag (cp311, manylinux_2_17 vs _2_28, x86_64)
+  for you.  Hand-written URLs fail most often on exactly that tag, so prefer it
+  over guessing an asset name.
+* DTK 26.04 (`/opt/dtk`, `hipcc`, torch 2.9.0+das.opt1.dtk2604) is **not**
+  downloadable: it is the DCU software stack baked into the platform image.  The
+  build needs it in place; everything else above is fetched.
+
 ## Build
 
 ```bash

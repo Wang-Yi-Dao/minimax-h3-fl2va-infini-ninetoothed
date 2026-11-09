@@ -35,14 +35,14 @@ src/infinicore_ninetoothed_hygon.patch  为 HYGON 打开九齿的整套 InfiniCo
 jobs/setup.py                        作业侧环境装配：解包预编译 InfiniCore/InfiniLM、装 pylibs、建模型 symlink、patch transformers
 jobs/run_tp8_fl2va.sh                正式出片：TP8、768x928、124 帧、N 步、带音频 + 官方 compare
 jobs/ab_native_vs_legacy.sh          同 seed / 同 prompt A/B：非 legacy（InfiniLM）vs legacy（PyTorch），任意步数
-jobs/ab_aten_fa_probe.sh             A) 九齿 FA 在真实 S=27570 下 vs torch SDPA 的精度；B) 全模型改用 ATen attention 出片
-jobs/fa_precision_probe.py           A 段的 python 主体
+jobs/fa_precision_probe.py           九齿 FA 在真实 S=27570 下 vs torch SDPA 的精度探针（离线诊断用，不参与出片）
 jobs/ssim_report.py                  视频相似度矩阵（灰度 + 长边≤512 + 双线性 + data_range=255，与官方 compare 同口径）
 jobs/submit_multi.mjs                提交器：上传工程文件→存 config→snapshot→preflight→submit（首次建项目文件）
 jobs/submit_snap.mjs                 提交器：直接复用已有 snapshot 提交（快照额度耗尽时的唯一通路）
 build/bld_infinicore.sh              InfiniCore 构建配方（xmake + 九齿 AOT 生成）
 build/rebuild_and_repack.sh          重编后重打包 `infinicore.tgz`（只替换 5 个 .so）
 results/compare_nn38_50steps.txt     官方 compare 的原始输出与运行统计（80.012%，含同配置重跑 79.150%）
+results/compare_nn40_freshlibs.txt   删除 ATen 通道后重编的库的官方 compare（79.462%，含同日对照跑 79.874%）
 results/ab_2step_table.md            2 步 A/B 多轮复跑实测表（衡量同一实现的可复现性）
 ```
 
@@ -101,8 +101,6 @@ python3 -u examples/minimax_h3_compare.py --tasks fl2va --output-dir $W/cmpout -
 ## 4. 已知限制
 - 单卡/TP2 装不下全模型（61.7 GB，TP2 每卡约 30.9 GB 仍 `cudaMalloc` 失败），只能 TP8。
 - 九齿 FA 未做 split-K，端到端比 legacy 慢约 39%（18.22 vs 13.14 s/step）。
-- 九齿 FA 的 kernel 变体只覆盖 bf16，概率—值乘法在 bf16 精度下进行，是当前相似度的主要损失项（改 ATen 参考路径可得 95.646%，但该路径用 torch 计算、不符合赛题要求，仅作诊断上界）。
+- 九齿 FA 的 kernel 变体只覆盖 bf16，概率—值乘法在 bf16 精度下进行，是当前相似度的主要损失项。
 - 同一实现多次出片之间存在低位数值漂移（同 seed 2 步 A/B 多轮落在 0.23–0.64），属 bf16 归约顺序与分配器复用的
   可复现性上限；`results/ab_2step_table.md` 给出多轮实测。
-- `H3_FORCE_ATEN_ATTN=1` 可把九齿 FA 换成 ATen 参考实现（`mha_ninetoothed_hygon.cc` 内的 env gate），
-  用于 A/B 判读；S=27570 下不 OOM、不慢于九齿。

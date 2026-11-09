@@ -1,0 +1,40 @@
+官方评分脚本原始输出 —— 删除 ATen 通道后重新编译的库（TP8 / 768x928 / 124 帧 / 50 步 / seed 42 / 带音频）
+
+本记录用的 5 个库全部来自 crbso13 作业重编（源码 = src/overlay.tar.gz 内当前那份
+mha_ninetoothed_hygon.cc，sha256 238facd9…），不是 $H/b1/out_release 里的历史产物。
+
+--- 库自检 ---
+POST_CPPAPI  2026-11-09 09:02:56 +0000  size=13264232   (旧库 13243736)
+H3_FORCE_ATEN 字符串命中 = 0        (旧库有该环境开关)
+"causal path: matmul" 命中 = 1      (新的 InfiniCore 算子组合分支已编入)
+h3_pad80 命中 = 1
+FRESH libinfiniop.so 30748784  libinfinicore_cpp_api.so 13264232
+FRESH libinfinirt.so 48184     libinfiniccl.so 52104
+
+--- 冒烟（2 步）---
+SMOKE_RC=0 mp4=2992657
+
+--- 运行统计（正式 50 步）---
+job b7fa0acaa8a94860b62c850b9108af9f
+RUN_RC=0 failed=0 run_secs=914 steps=50 sec_per_step=18.28
+Size:   PASS (PyTorch 768x928, InfiniLM 768x928)
+Length: PASS (PyTorch 124 frames, InfiniLM 124 frames)
+Average SSIM: 79.462%
+CMP_RC=0
+TOTAL_SECS=1140
+
+causal 分支触发次数：0（全 50 步日志 grep "causal path" = 0）
+  ⇒ FL2VA 路径上 is_causal 恒为 false，删掉的 ATen 因果通道从未执行，
+    与源码结论一致；新写的 matmul + causal_softmax + matmul 组合在此路径不被调起。
+
+--- 同日对照跑（同一脚本，改用 2026-11-05 编的旧库）---
+job 51c7ae0a28e546a5b797328580585161
+RUN_RC=0 failed=0 run_secs=914 steps=50 sec_per_step=18.28
+Average SSIM: 79.874%
+CMP_RC=0
+TOTAL_SECS=966
+
+--- 归因 ---
+历史 80.012% → 今日旧库 79.874%   差 0.14 pp  跨时段重跑波动（rank 线程调度时序）
+今日旧库 79.874% → 新库 79.462%   差 0.41 pp  与上面波动同量级，且 causal 分支 0 次触发
+⇒ 删除 ATen 通道是纯合规改动；成绩差异落在重跑噪声范围内，不是数值路径改变。

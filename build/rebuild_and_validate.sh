@@ -17,7 +17,7 @@ RW=$PROJ/.run
 echo "JOB_START $(date -u +%FT%T) host=$(hostname) crb-pub"
 df -h "$PROJ" | tail -1
 echo "PUB_SNAP_SHA=620d40e299ed25d154903d09242b5b1dc5ec37f7c971a7ed116902217a029fdd"
-echo "PUB_OVERLAY_SHA=e66b78c22385b4ae5d6c80c3ce28c9db72c1ff5159f0c26f5094fd781e5ce754"
+echo "PUB_OVERLAY_SHA=f1f28f733e9927774dc12f50b03d57bda758f01cda1af5cb5ea81f368ef202a9"
 echo "PUB_KERNELS_SHA=fbf982472e7f195038c6f4225448d6b7c82a358f2092c363278c685423e821cc"
 echo "=== A. stage the published artefacts and verify them"
 cp -f "$H/src/InfiniCore.tgz" "$PROJ/snapshot.tgz" || { echo SNAP_COPY_FAIL; exit 0; }
@@ -25,7 +25,7 @@ rm -rf "$PROJ/kernels"; mkdir -p "$PROJ/kernels"
 cp -f "$H/crb/kernels_deployed.tgz" "$PROJ/kernels.tgz" || { echo KERNELS_COPY_FAIL; exit 0; }
 cat $(ls "$PROJ"/ov.p* | sort -V) | base64 -d > "$PROJ/overlay.tar.gz" || { echo B64_FAIL; exit 0; }
 for pair in "snapshot.tgz:620d40e299ed25d154903d09242b5b1dc5ec37f7c971a7ed116902217a029fdd" \
-            "overlay.tar.gz:e66b78c22385b4ae5d6c80c3ce28c9db72c1ff5159f0c26f5094fd781e5ce754" \
+            "overlay.tar.gz:f1f28f733e9927774dc12f50b03d57bda758f01cda1af5cb5ea81f368ef202a9" \
             "kernels.tgz:fbf982472e7f195038c6f4225448d6b7c82a358f2092c363278c685423e821cc"; do
   f=${pair%%:*}; want=${pair##*:}
   got=$(sha256sum "$PROJ/$f" | cut -d" " -f1)
