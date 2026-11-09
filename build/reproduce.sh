@@ -88,7 +88,7 @@ export W PY DTK J ARCH PHASE=all
 export IC_TGZ=$SRC/InfiniCore-snapshot-mit.tar.gz
 export OVL_TGZ=$SRC/overlay.tar.gz
 export CRB_KERNELS_TGZ=$SRC/kernels_deployed.tgz
-export XMAKE_TGZ CRB_SCRATCH=$W/scratch PYBIND11_ROOT=$PB
+export XMAKE_TGZ="$XM_TGZ" CRB_SCRATCH=$W/scratch PYBIND11_ROOT="$PB"
 # WHEELS 可指向本地轮子目录以跳过下载；不设则由 from_scratch.sh 去 PyPI 取。
 [ -n "${WHEELS:-}" ] && export WHEELS
 LOG=$W/from_scratch.log
