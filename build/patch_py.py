@@ -142,11 +142,25 @@ edit("triton-cache-exdev", "triton/runtime/cache.py", [(
     "            pass\n",
 )], "EXDEV_FALLBACK")
 
-# 8. triton 3.3.0 registers -w twice in tools/compile.py (num-warps and
-#    num-ldmatrixes), so argparse aborts before the kernel is even parsed.
-edit("triton-argparse-w", "triton/tools/compile.py", [(
-    'parser.add_argument("--num-ldmatrixes", "-w"',
-    'parser.add_argument("--num-ldmatrixes"',
-)], 'CONFLICT_W')
+# 8. triton 3.3.0 registers the short flag -w on more than one option
+#    (--num-ldmatrixes, --enable-mmacfuse ...), so argparse aborts before the
+#    kernel is even parsed.  Keep -w on --num-warps, drop it everywhere else.
+CONFLICT_W = "ARG_W_DEDUP"
+CMP_PY = PY / "triton" / "tools" / "compile.py"
+if not CMP_PY.is_file():
+    print("PATCH triton-argparse-w MISS (no triton/tools/compile.py)")
+elif CONFLICT_W in CMP_PY.read_text():
+    print("PATCH triton-argparse-w SKIP (already applied)")
+else:
+    _lines = CMP_PY.read_text().splitlines(True)
+    _dropped = 0
+    for _i, _line in enumerate(_lines):
+        if '"-w"' in _line and "num-warps" not in _line:
+            _new = _line.replace(', "-w"', "")
+            if _new != _line:
+                _lines[_i] = _new
+                _dropped += 1
+    CMP_PY.write_text("".join(_lines) + "# " + CONFLICT_W + "\n")
+    print("PATCH triton-argparse-w OK (short -w dropped on %d options)" % _dropped)
 
 print("PATCH_DONE")
