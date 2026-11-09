@@ -142,4 +142,11 @@ edit("triton-cache-exdev", "triton/runtime/cache.py", [(
     "            pass\n",
 )], "EXDEV_FALLBACK")
 
+# 8. triton 3.3.0 registers -w twice in tools/compile.py (num-warps and
+#    num-ldmatrixes), so argparse aborts before the kernel is even parsed.
+edit("triton-argparse-w", "triton/tools/compile.py", [(
+    'parser.add_argument("--num-ldmatrixes", "-w"',
+    'parser.add_argument("--num-ldmatrixes"',
+)], 'CONFLICT_W')
+
 print("PATCH_DONE")
