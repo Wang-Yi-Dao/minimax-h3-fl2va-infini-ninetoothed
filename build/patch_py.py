@@ -4,11 +4,13 @@
 
   usage: patch_py.py <dir that holds ninetoothed/ and triton/>
 
-Five independent, named edits.  Each one is idempotent and prints
+Nine independent, named edits (one of them gated, see the end of the file).
+Each one is idempotent and prints
 "PATCH <name> OK|SKIP|MISS" so a build log shows exactly which edits landed.
 Every edit exists because the stock wheel assumes a live device, a CUDA-style
 ".c" temp file, or a rename(2) that the container filesystem does not provide.
 """
+import os
 import pathlib
 import sys
 
@@ -141,6 +143,26 @@ edit("triton-cache-exdev", "triton/runtime/cache.py", [(
     "        except OSError:\n"
     "            pass\n",
 )], "EXDEV_FALLBACK")
+
+# 9. ninetoothed asks the driver for the current device just to size its
+#    innermost tile.  An AOT-only build has no device (and no torch), so take
+#    the two numbers from the environment instead.  The defaults are the gfx936
+#    values, so the emitted tiling is identical to an on-device build.
+if os.environ.get("NINETOOTHED_OFFLINE_DEVICE") == "1":
+    # Only when no device is visible: with DTK torch importable the real
+    # properties are read and the fallback below must not shadow them.
+    edit("nt-generation-device", "ninetoothed/generation.py", [(
+    "        device = triton.runtime.driver.active.get_current_device()\n"
+    "        properties = triton.runtime.driver.active.utils.get_device_properties(device)\n",
+    "        # OFFLINE_DEVICE: an AOT-only build has no device to query\n"
+    "        import os\n"
+    "\n"
+    "        _regs = int(os.environ.get(\"NINETOOTHED_MAX_NUM_REGS\", \"65536\"))\n"
+    "        _shared = int(os.environ.get(\"NINETOOTHED_MAX_SHARED_MEM\", \"65536\"))\n"
+    "        properties = {\"max_num_regs\": _regs, \"max_shared_mem\": _shared}\n",
+    )], "OFFLINE_DEVICE")
+else:
+    print("PATCH nt-generation-device SKIP (device visible, real properties used)")
 
 # 8. triton 3.3.0 registers the short flag -w on more than one option
 #    (--num-ldmatrixes, --enable-mmacfuse ...), so argparse aborts before the

@@ -13,7 +13,7 @@ not object code), and the rest is the scripts that drive the build.
 | file | what it is |
 |---|---|
 | `from_scratch.sh` | the whole build, six named steps, environment driven |
-| `patch_py.py` | the seven edits that make the stock triton / ninetoothed wheels usable offline; prints `PATCH <name> OK\|SKIP\|MISS` for each |
+| `patch_py.py` | the nine edits that make the stock triton / ninetoothed wheels usable offline; prints `PATCH <name> OK\|SKIP\|MISS` for each |
 | `gen_dispatch.py` | emits `ic/build/ninetoothed/flash_attention.{c,h}`, the dispatcher that chains the two kernels behind one C entry point |
 | `rebuild_and_validate.sh` | the one-job wrapper used for the reproducibility check: verify shas, rebuild, then run 50 steps + official compare |
 | `../src/InfiniCore-snapshot-mit.tar.gz` | upstream InfiniCore snapshot (MIT, includes `LICENSE`) |
@@ -46,25 +46,19 @@ src/infinicore/ops/multi_head_attention/hygon_nt/mha_ninetoothed_hygon.cc   (new
 
 ## Getting the build dependencies
 
-None of the five items below is produced by this project — they are public or
-vendor artefacts, pinned to the exact versions the released library was built
-with.  Run this once; afterwards `WHEELS`, `XMAKE_TGZ` and `PYBIND11_ROOT`
-point at what it produced.
+None of the items below is produced by this project — they are public or vendor
+artefacts, pinned to the exact versions the released library was built with.
+`build/fetch_wheels.py` fetches the four wheels; the other two are plain
+downloads.  Run this once; afterwards `WHEELS`, `XMAKE_TGZ` and
+`PYBIND11_ROOT` point at what it produced.
 
 ```bash
-# 1) the three wheels the AOT step imports (python 3.11, x86_64)
-mkdir -p wheels
-pip download ninetoothed==0.26.0 numpy==1.26.4 \
-  --only-binary=:all: --python-version 311 --platform manylinux2014_x86_64 \
-  -d wheels -i https://pypi.org/simple
-
-#    triton is NOT on pypi.org.  The build needs the Hygon-patched wheel, whose
-#    local version tag (+das.opt1.dtk2604.torch290) exists only on the DTK mirror:
-#    stock triton has no hip:gfx936 backend, so step 3 could not emit a kernel.
-pip download "triton==3.5.1+das.opt1.dtk2604.torch290" \
-  --only-binary=:all: --python-version 311 --platform manylinux_2_28_x86_64 \
-  -d wheels -i https://pypi.sourcefind.cn/release/dtk/simple/ \
-  --trusted-host pypi.sourcefind.cn
+# 1) the four wheels the AOT step imports, plus the Hygon triton build.
+python3.11 build/fetch_wheels.py wheels
+#    -> ninetoothed-0.26.0-py3-none-any.whl
+#       sympy-*.whl, mpmath-*.whl
+#       numpy-1.26.4-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+#       triton351.whl  (3.5.1+das.opt1.dtk2604.torch290, cp311, ~105 MB)
 
 # 2) xmake 3.1.2 (GitHub release asset; -L is required, the URL redirects)
 curl -L -o xmake-3.1.2.tar.gz \
@@ -74,6 +68,36 @@ curl -L -o xmake-3.1.2.tar.gz \
 pip download pybind11==3.1.0 --no-deps -d /tmp/pb -i https://pypi.org/simple
 mkdir -p /opt/pybind11-3.1.0 && unzip -q /tmp/pb/pybind11-3.1.0-*.whl -d /opt/pybind11-3.1.0
 ```
+
+Why a script instead of `pip download`: the platform image ships pip 26.0.1,
+whose resolver dies with an internal traceback on exactly these downloads, and
+ninetoothed/numpy need different platform selectors anyway (ninetoothed 0.26.0
+is `py3-none-any`, so asking for it with a manylinux `--platform` matches no
+file at all).  `fetch_wheels.py` reads the file URLs from PyPI's JSON metadata
+and downloads them directly; a manual fallback is one `curl` per file.
+
+Two wheel choices are load-bearing:
+
+* **triton must be the Hygon build.** pypi.org's triton has no `hip:gfx936`
+  backend, so step 3 could not emit a kernel at all.
+* **triton must be the plain `3.5.1+das.opt1.dtk2604.torch290` build, not the
+  date-stamped rebuilds** (`...+2605201943.ge3cdf9`).  Those pass
+  `-mllvm=-check-valu-data-forward-hazards=0` and friends to an external clang;
+  the container's only clang is 17, which does not know them, so it prints its
+  option help, exits 0 and writes no `.amdgcn` — surfacing much later as
+  `File operation failed: [Errno 2] No such file or directory: .../tmp*.amdgcn`.
+  The plain build lowers amdgcn in-process through its bundled libtriton
+  (`triton/backends/amd/compiler.py`, no external clang) and needs no such flag.
+
+Two environment facts decide the interpreter: the DTK torch in this image is
+cp311-only, so the triton wheel must be the cp311 build, and every step runs
+under `python3.11` (the image also carries a 3.10, which has no torch and
+therefore no HIP driver).  `from_scratch.sh` takes the interpreter from `$PY`
+(default `python3.11`) and decides `NINETOOTHED_OFFLINE_DEVICE` by itself: when
+`$PY -c "import torch"` works it is left unset so that `ninetoothed` reads the
+real gfx936 device properties, and only a driverless environment falls back to
+`patch_py.py`'s fixed numbers.
+
 
 then
 

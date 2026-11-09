@@ -63,7 +63,8 @@ jobs/     setup.py（集群侧解包/装配）、run_tp8_fl2va.sh（TP8 出片 +
 build/    bld_infinicore.sh（InfiniCore 构建配方）、rebuild_and_repack.sh（改 kernel 后重生成 + 重打包）
 results/  compare_nn38_50steps.txt（官方 compare 原始输出，含同配置重跑）、ab_2step_table.md（2 步 A/B 实测）、
           compare_nn40_freshlibs.txt（删除 ATen 通道后重编的库的官方 compare：79.462%，附同日对照跑 79.874%）、
-          rebuild_check.txt（第三方从源码重建的实测记录：79.907%）
+          rebuild_check.txt（第三方从源码重建的实测记录：79.907%）、
+          rebuild_check_20261110.txt（第二次干净重建的完整作业日志：79.402%，15.73 s/step）
 docs/     初赛实验报告.md、提交清单.md
 figures/  compare_nn38_platform.png（作业卡片 + 结果区）、compare_nn38_log.png（日志框内的官方 compare 输出，80.012%）、
           video_frames_nl50.png（成片第 1/61/124 帧抽帧对照）
@@ -127,12 +128,18 @@ export CRB_LIBS=<上一步的 build-work>/ic/build/linux/x86_64/release
 bash jobs/run_tp8_fl2va.sh 50 1600
 ```
 
-实测（8 卡，干净工作区，只喂上面三个输入，`build/rebuild_and_validate.sh` 一个作业跑完）：
-三份 sha256 全部 `SHA_OK`；构建 `BUILD_EXIT=0`，5 个 so 全部产出
-（`libinfiniop.so` 30,752,880 B、`libinfinicore_cpp_api.so` 13,297,376 B、
-`_infinicore.cpython-311-x86_64-linux-gnu.so` 1,612,400 B）；50 步 18.2 s/step（910 s）；
-官方 compare `Size PASS / Length PASS`、**Average SSIM 79.907%**（`CMP_RC=0`）；
-构建 + 出片 + 评测共 960 s。与本仓库正式成绩 80.012% 同一档，细节与踩坑见 `build/README.md`。
+实测两次（8 卡，干净工作区，只喂上面三个输入，`build/rebuild_and_validate.sh` 一个作业跑完）。
+两次都是三份 sha256 全部 `SHA_OK`、构建 `BUILD_EXIT=0`、5 个 so 全部产出：
+
+| 运行 | libinfinicore_cpp_api.so | 50 步速度 | 出片 | 官方 compare | 全流程 |
+|---|---|---|---|---|---|
+| 首轮重建 | 13,297,376 B | 18.2 s/step（910 s） | 1,619,081 B | Size/Length PASS，**SSIM 79.907%** | 960 s |
+| 次轮重建 `2d8f9760…` | 13,264,224 B | 15.73 s/step（773 s） | 1,612,921 B | Size/Length PASS，**SSIM 79.402%** | 969 s |
+
+其余四个 so 两次字节数一致：`libinfiniop.so` 30,752,880 B、`libinfinirt.so` 48,184 B、
+`libinfiniccl.so` 52,104 B、`_infinicore.cpython-311-x86_64-linux-gnu.so` 1,612,400 B。
+四个独立运行点（正式 80.012%、同配置重跑 79.150%、两次重建 79.907% / 79.402%）同属 79%–80% 一档。
+原始日志：`results/rebuild_check.txt`、`results/rebuild_check_20261110.txt`；细节与踩坑见 `build/README.md`。
 
 ## 已知限制 / 未完成
 

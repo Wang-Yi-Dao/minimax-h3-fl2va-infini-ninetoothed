@@ -26,6 +26,9 @@ PYBIND11_ROOT=${PYBIND11_ROOT:?set PYBIND11_ROOT}
 PYTHON_INCLUDE=${PYTHON_INCLUDE:-/usr/local/include/python3.11}
 PYTHON_LIBDIR=${PYTHON_LIBDIR:-/usr/local/lib}
 PYTHON_LIBNAME=${PYTHON_LIBNAME:-python3.11}
+# The interpreter must be the one the wheels were built for: the DTK torch is
+# cp311-only, so a 3.11 wheel set is what actually works here (see build/README.md).
+PY=${PY:-python3.11}
 J=${J:-32}
 ARCH=${ARCH:-gfx936}
 
@@ -37,8 +40,15 @@ do_prep=1; [ "$PHASE" = "build" ] && do_prep=0
 if [ "$do_prep" = 1 ]; then
 stage "prep (work=$W)"
 mkdir -p "$W"/py "$W"/ic "$W"/xm "$W"/tmp "$W"/tcache "$W"/logs
+if [ -z "$WHEELS" ]; then
+  # No wheel directory given: fetch the four wheels (ninetoothed, sympy, mpmath,
+  # numpy, plus the Hygon triton build) from PyPI's JSON API.  pip in this image
+  # cannot do it -- see build/README.md and fetch_wheels.py.
+  WHEELS="$W/whl"
+  "$PY" "$(dirname "$0")/fetch_wheels.py" "$WHEELS" || { echo "FETCH_WHEELS_FAILED"; exit 1; }
+fi
 if [ -n "$WHEELS" ]; then
-  python3 - "$W/py" "$WHEELS" <<'PYEOF'
+  "$PY" - "$W/py" "$WHEELS" <<'PYEOF'
 import sys, zipfile, pathlib, glob, os
 dst = pathlib.Path(sys.argv[1]); dst.mkdir(parents=True, exist_ok=True)
 n = 0
@@ -61,7 +71,7 @@ fi
 # The work tree may have been produced by an earlier run under a different uid
 # mapping; GNU tar then refuses with "Cannot open: File exists".  Unpack the nine
 # overlay files with python instead, chmod-ing each target first.
-python3 - "$OVL_TGZ" "$W/ic" <<'PYEOF' || exit 1
+"$PY" - "$OVL_TGZ" "$W/ic" <<'PYEOF' || exit 1
 import os, sys, tarfile
 tgz, dst = sys.argv[1], sys.argv[2]
 bad = 0
@@ -121,7 +131,7 @@ fi
 echo "xmake=$XM_BIN share=$XM_SHARE"
 
 stage "step 1/6 thrust version shim (DTK thrust 2.3.2 vs CCCL 2.4.0 static_assert)"
-python3 - "$W" <<'PYEOF'
+"$PY" - "$W" <<'PYEOF'
 import io, os, sys
 W = sys.argv[1]; ic = os.path.join(W, 'ic')
 shim = os.path.join(ic, 'xmake', 'thrust_shim', 'thrust')
@@ -150,10 +160,19 @@ print('shim ok', os.path.isfile(os.path.join(shim, 'version.h')), 'THRUST_SHIM_D
 PYEOF
 
 stage "step 2/6 python AOT patches (patch_py.py: driverless target, hip .cpp sources, EXDEV cache)"
+# The offline-properties edit is only correct when no device is visible; with the
+# DTK torch importable the driver query returns the real gfx936 numbers, which is
+# strictly better than the fallback.  Decide it here rather than by hand.
+if "$PY" -c "import torch" >/dev/null 2>&1; then
+  unset NINETOOTHED_OFFLINE_DEVICE
+else
+  export NINETOOTHED_OFFLINE_DEVICE=1
+fi
+echo "NINETOOTHED_OFFLINE_DEVICE=${NINETOOTHED_OFFLINE_DEVICE:-0}"
 PATCHER=$(dirname "$0")/patch_py.py
 if [ ! -f "$PATCHER" ]; then echo "PATCHER_MISSING: put patch_py.py next to from_scratch.sh"; exit 1; fi
 echo "patcher=$PATCHER"
-python3 "$PATCHER" "$W/py" || { echo "PATCHER_FAILED"; exit 1; }
+"$PY" "$PATCHER" "$W/py" || { echo "PATCHER_FAILED"; exit 1; }
 
 stage "step 3/6 nine-toothed AOT kernels (flash-attention grids 72 and 128, bf16, block 256x64)"
 export PATH="$DTK/bin:$PATH"
@@ -181,13 +200,13 @@ export NINETOOTHED_CC="$DTK/bin/hipcc"
 # PYTHONFAULTHANDLER makes the AOT compile subprocess dump a python traceback
 # instead of dying silently if it hits a signal.
 export PYTHONFAULTHANDLER=1
-python3 -c "import triton; print('triton', triton.__version__)" 2>&1 | tail -2
+"$PY" -c "import triton; print('triton', triton.__version__)" 2>&1 | tail -2
 # LLVM codegen of the flash-attention kernel recurses deeply; the default 8 MB
 # stack overflows (SIGSEGV) in some containers.
 echo "ulimit -s = $(ulimit -s)"
 ulimit -s unlimited 2>/dev/null || ulimit -s 262144 2>/dev/null
 echo "ulimit -s -> $(ulimit -s)"
-python3 -m triton.tools.compile --help >/dev/null 2>&1
+"$PY" -m triton.tools.compile --help >/dev/null 2>&1
 echo "COMPILE_HELP_RC=$?"
 export NINETOOTHED_CFLAGS="-I$CUDA_HOME/targets/x86_64-linux/include -L$CUDA_HOME/targets/x86_64-linux/lib -std=c++17"
 rm -rf "$W/ic/build/ninetoothed"/*
@@ -211,7 +230,7 @@ else
   # Only the flash-attention kernels are needed: the other nine-toothed ops stay
   # on their default backends because their INFINIOP_*_NINETOOTHED_* macros are
   # not defined at configure time (see step 5).
-  python3 -u -c "import infiniop.ops.flash_attention.ninetoothed.build as b; b.build()" >"$W/aot.log" 2>&1
+  "$PY" -u -c "import infiniop.ops.flash_attention.ninetoothed.build as b; b.build()" >"$W/aot.log" 2>&1
   NTOPS_RC=$?
   echo "NTOPS_RC=$NTOPS_RC"
   tail -25 "$W/aot.log"
@@ -226,12 +245,12 @@ stage "step 3c/6 dispatcher sources (flash_attention.c/.h over the two grids)"
 if [ ! -f "$W/ic/build/ninetoothed/flash_attention.h" ]; then
   GD=$(dirname "$0")/gen_dispatch.py
   [ -f "$GD" ] || { echo "GEN_DISPATCH_MISSING"; exit 1; }
-  ( cd "$W/ic" && PYTHONPATH="$W/py:$W/ic/src" python3 -u "$GD" ) || { echo "GEN_DISPATCH_FAILED"; exit 1; }
+  ( cd "$W/ic" && PYTHONPATH="$W/py:$W/ic/src" "$PY" -u "$GD" ) || { echo "GEN_DISPATCH_FAILED"; exit 1; }
 fi
 ls -l "$W/ic/build/ninetoothed"/flash_attention.[ch] || { echo "DISPATCH_SOURCES_MISSING"; exit 1; }
 
 stage "step 4/6 generated source fixes (warpSize is 64 on gfx936, hip context call)"
-python3 - "$W" <<'PYEOF'
+"$PY" - "$W" <<'PYEOF'
 import glob, io, os, sys
 W = sys.argv[1]
 n = tot = 0
@@ -249,7 +268,7 @@ else
 fi
 
 stage "step 5a/6 xmake self-patches (tolerant mkdir on AFS, build cache off)"
-python3 - "$XM_SHARE" <<'PYEOF'
+"$PY" - "$XM_SHARE" <<'PYEOF'
 import io, os, sys
 X = sys.argv[1]
 p = os.path.join(X, 'core/base/os.lua')
