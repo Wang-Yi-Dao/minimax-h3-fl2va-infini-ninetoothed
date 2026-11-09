@@ -4,7 +4,9 @@
 #
 #   IC_TGZ       upstream InfiniCore snapshot tarball (top dir InfiniCore/)
 #   OVL_TGZ      overlay tarball from this package (patch/overlay.tar.gz)
-#   XMAKE_TGZ    xmake 3.1.2 linux x86_64 tarball
+#   XMAKE_TGZ    xmake 3.1.2 release tarball -- upstream publishes no portable
+#                linux binary (the bundle needs GLIBC_2.38), so this is the source
+#                tree and step 0 builds it in place
 #   WHEELS       directory holding triton / ninetoothed / numpy wheels (optional)
 #   PYBIND11_ROOT PYTHON_INCLUDE PYTHON_LIBDIR PYTHON_LIBNAME  build deps
 #   W            work directory (default ./build-work)   DTK  DTK root (/opt/dtk)
@@ -85,9 +87,11 @@ sys.exit(1 if bad else 0)
 PYEOF
 grep -l h3_pad80 "$W/ic/src/infinicore/ops/multi_head_attention/hygon_nt/mha_ninetoothed_hygon.cc" >/dev/null || { echo "OVL_VERIFY_FAIL"; exit 1; }
 echo "$OVL_SHA" > "$W/ic/.crb_overlay_sha"
+mkdir -p "$W/logs"
 if [ "${CRB_RESUME:-0}" = 1 ] && [ -n "$XM_BIN" ] && [ -x "$XM_BIN" ]; then
   echo "xmake already extracted, reusing $XM_BIN"
 else
+  rm -rf "$W/xm"; mkdir -p "$W/xm"
   tar xzf "$XMAKE_TGZ" -C "$W/xm" || exit 1
 fi
 # xmake reaches these through os.getenv(), so they must live in the environment.
@@ -96,7 +100,23 @@ export J ARCH DTK
 # xmake may be extracted by *this* run (fresh work directory), so the binary and
 # its module directory have to be located again before they are used.
 XM_BIN=$(find "$W/xm" -maxdepth 5 -type f -name xmake -perm -u+x 2>/dev/null | head -1)
-XM_SHARE=$(dirname "$(dirname "$XM_BIN")")/share/xmake
+if [ -n "$XM_BIN" ]; then
+  XM_SHARE=$(dirname "$(dirname "$XM_BIN")")/share/xmake
+else
+  # The xmake release tarball is a *source* tree: upstream ships no portable
+  # linux binary (the bundle needs GLIBC_2.38, this image has 2.35), so build
+  # it here.  ~3-4 min; ./configure writes build/linux/x86_64/release, make
+  # links build/xmake, and the Lua program tree lives in <src>/xmake.
+  XSRC=$(find "$W/xm" -maxdepth 4 -type f -name configure -perm -u+x 2>/dev/null | head -1)
+  [ -n "$XSRC" ] || { echo "XMAKE_NOT_FOUND under $W/xm"; exit 1; }
+  XSRC=$(dirname "$XSRC")
+  stage "step 0/6 xmake from the release source tree"
+  ( cd "$XSRC" && ./configure > "$W/logs/xmake-configure.log" 2>&1 && \
+    make -j"$J" > "$W/logs/xmake-make.log" 2>&1 ) || {
+      echo "XMAKE_BUILD_FAIL"; tail -20 "$W/logs/xmake-make.log" 2>/dev/null | cut -c1-160; exit 1; }
+  XM_BIN="$XSRC/build/xmake"
+  XM_SHARE="$XSRC/xmake"   # program dir of a source build, not share/xmake
+fi
 [ -x "$XM_BIN" ] || { echo "XMAKE_NOT_FOUND under $W/xm"; exit 1; }
 echo "xmake=$XM_BIN share=$XM_SHARE"
 
