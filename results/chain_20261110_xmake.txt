@@ -1,0 +1,18 @@
+JOB_START 2026-11-10T04:57:49
+CH /public/home/aclsylqidf/infinifabric-users/users/7afc10d702784d51ae6d6035c6df9bd7/minimax_h3/chain/20261110_045748
+NPROC 128 BUDGET 2600
+WORKDIR /dev/shm/infinifabric-preparation/shell-a32cff23e412470fb32fd714cb2f4fdd/xmstep tmpfs           472G  6.3G  466G   2% /dev/shm
+LOCAL_SCRATCH=1
+SEED_PROBE /public/home/aclsylqidf/infinifabric-users/users/7afc10d702784d51ae6d6035c6df9bd7/minimax_h3/chain/20261110_035201/xm/xmake-3.1.2 objs=401
+SEED_PICK /public/home/aclsylqidf/infinifabric-users/users/7afc10d702784d51ae6d6035c6df9bd7/minimax_h3/chain/20261110_035201/xm/xmake-3.1.2 objs=401
+SEED_COPY_SECS 91
+XSRC /dev/shm/infinifabric-preparation/shell-a32cff23e412470fb32fd714cb2f4fdd/xmstep/xm csources=860 objs=401
+XM_MAKE_START 2026-11-10T04:59:50 j=128
+XM_MAKE 05:00:20 el=151 objs=468 lines=95
+XM_MAKE 05:00:51 el=182 objs=547 lines=152
+XM_MAKE 05:01:21 el=212 objs=589 lines=200
+XM_MAKE_END rc=0 el=213
+PY_TAR_BYTES 1666845
+XMP_ARCHIVE /public/home/aclsylqidf/infinifabric-users/users/7afc10d702784d51ae6d6035c6df9bd7/minimax_h3/chain/20261110_045748/xmake-toolchain.tgz bytes=1666845 copy_secs=0
+b201aeb7163709048230ed801fc2ddfab24586f1624b40810334ec9e7878ce8f  /public/home/aclsylqidf/infinifabric-users/users/7afc10d702784d51ae6d6035c6df9bd7/minimax_h3/chain/20261110_045748/xmake-toolchain.tgz
+XMP_OK 2026-11-10T05:01:27 el=218

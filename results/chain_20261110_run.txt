@@ -1,0 +1,98 @@
+RUN_START 2026-11-10T05:37:44 steps=50 budget=1500 chain=/public/home/aclsylqidf/infinifabric-users/users/7afc10d702784d51ae6d6035c6df9bd7/minimax_h3/chain/20261110_050314
+CHAIN_SO _infinicore.cpython-311-x86_64-linux-gnu.so 1612400
+CHAIN_SO libinfiniop.so 30752880
+CHAIN_SO libinfinicore_cpp_api.so 13264224
+CHAIN_SO libinfinirt.so 48184
+CHAIN_SO libinfiniccl.so 52104
+REPO_TGZ src=https://ghproxy.net/ secs=47
+--- repo ok, CRB_LIBS=/public/home/aclsylqidf/infinifabric-users/users/7afc10d702784d51ae6d6035c6df9bd7/minimax_h3/chain/20261110_050314/libs
+PRELOAD=/public/home/aclsylqidf/infinifabric-users/users/7afc10d702784d51ae6d6035c6df9bd7/minimax_h3/b1/pre_ctxid.so:/opt/infinifabric-resources/pty-v2-dea1c03b6d97/compat.so
+LAUNCH_BLOCKING=1
+RUN_BUDGET=1461s
+--- 05:39:15 progress (5s):
+--- 05:40:17 progress (67s):
+Processing files: 100%|██████████| 14/14 [00:12<00:00,  1.00s/it]
+Processing files: 100%|██████████| 14/14 [00:12<00:00,  1.09it/s]
+--- 05:41:19 progress (129s):
+  2%|▏         | 1/49 [00:17<14:04, 17.60s/it]
+  4%|▍         | 2/49 [00:33<12:56, 16.51s/it]
+--- 05:42:21 progress (191s):
+ 10%|█         | 5/49 [01:20<11:41, 15.94s/it]
+ 12%|█▏        | 6/49 [01:36<11:22, 15.88s/it]
+--- 05:43:24 progress (254s):
+ 18%|█▊        | 9/49 [02:23<10:31, 15.78s/it]
+ 20%|██        | 10/49 [02:39<10:15, 15.79s/it]
+--- 05:44:26 progress (316s):
+ 27%|██▋       | 13/49 [03:26<09:27, 15.76s/it]
+ 29%|██▊       | 14/49 [03:42<09:11, 15.76s/it]
+--- 05:45:28 progress (378s):
+ 35%|███▍      | 17/49 [04:29<08:24, 15.75s/it]
+ 37%|███▋      | 18/49 [04:45<08:08, 15.75s/it]
+--- 05:46:30 progress (440s):
+ 43%|████▎     | 21/49 [05:32<07:20, 15.75s/it]
+ 45%|████▍     | 22/49 [05:48<07:05, 15.75s/it]
+--- 05:47:32 progress (501s):
+ 51%|█████     | 25/49 [06:35<06:17, 15.75s/it]
+ 53%|█████▎    | 26/49 [06:51<06:02, 15.74s/it]
+--- 05:48:33 progress (563s):
+ 59%|█████▉    | 29/49 [07:38<05:14, 15.74s/it]
+ 61%|██████    | 30/49 [07:54<04:59, 15.74s/it]
+--- 05:49:35 progress (625s):
+ 65%|██████▌   | 32/49 [08:25<04:27, 15.75s/it]
+ 67%|██████▋   | 33/49 [08:41<04:11, 15.75s/it]
+--- 05:50:37 progress (687s):
+ 73%|███████▎  | 36/49 [09:28<03:24, 15.76s/it]
+ 76%|███████▌  | 37/49 [09:44<03:09, 15.75s/it]
+--- 05:51:39 progress (749s):
+ 82%|████████▏ | 40/49 [10:31<02:21, 15.75s/it]
+ 84%|████████▎ | 41/49 [10:47<02:05, 15.75s/it]
+--- 05:52:41 progress (811s):
+ 90%|████████▉ | 44/49 [11:34<01:18, 15.73s/it]
+ 92%|█████████▏| 45/49 [11:50<01:02, 15.73s/it]
+--- 05:53:43 progress (873s):
+100%|██████████| 49/49 [12:53<00:00, 15.75s/it]
+100%|██████████| 49/49 [12:53<00:00, 15.79s/it]
+RUN_RC=0 failed=0 run_secs=909 steps=50 sec_per_step=18.18
+ 86%|████████▌ | 42/49 [11:03<01:50, 15.74s/it]
+ 88%|████████▊ | 43/49 [11:19<01:34, 15.74s/it]
+ 90%|████████▉ | 44/49 [11:34<01:18, 15.73s/it]
+ 92%|█████████▏| 45/49 [11:50<01:02, 15.73s/it]
+ 94%|█████████▍| 46/49 [12:06<00:47, 15.73s/it]
+ 96%|█████████▌| 47/49 [12:21<00:31, 15.74s/it]
+ 98%|█████████▊| 48/49 [12:37<00:15, 15.75s/it]
+100%|██████████| 49/49 [12:53<00:00, 15.75s/it]
+100%|██████████| 49/49 [12:53<00:00, 15.79s/it]
+Encoding video chunks:   0%|          | 0/1 [00:00<?, ?it/s]
+Encoding video chunks: 100%|██████████| 1/1 [00:00<00:00,  1.04it/s]
+Encoding video chunks: 100%|██████████| 1/1 [00:00<00:00,  1.04it/s]
+GET_MP4 bytes=1615256 path=/public/home/aclsylqidf/infinifabric-users/users/7afc10d702784d51ae6d6035c6df9bd7/minimax_h3/output2/nl50_1110_053831.mp4
+REF=/public/home/aclsylqidf/infinifabric-users/users/7afc10d702784d51ae6d6035c6df9bd7/minimax_h3/cmp/reference_fl2va.mp4
+
+[task] reference_fl2va: using existing result: /public/home/aclsylqidf/infinifabric-users/users/7afc10d702784d51ae6d6035c6df9bd7/minimax_h3/cmp/reference_fl2va.mp4
+
+[task] infinilm_fl2va: using existing result: /dev/shm/infinifabric-shell/284f2d3c2a3d4460a38efe2b52aa67c2/workspace/out/nl_50.mp4
+
+[compare] FL2VA: decoding outputs
+/public/home/aclsylqidf/infinifabric-users/users/7afc10d702784d51ae6d6035c6df9bd7/minimax_h3/pylibs_extra/skimage/metrics/_structural_similarity.py:4: UserWarning: A NumPy version >=1.26.4 and <2.7.0 is required for this version of SciPy (detected version 1.25.0)
+  from scipy.ndimage import uniform_filter
+
+[result] MiniMax-H3 video comparison
+
+  FL2VA
+    Size:         PASS (PyTorch 768x928, InfiniLM 768x928)
+    Length:       PASS (PyTorch 124 frames, InfiniLM 124 frames)
+    Average SSIM: 79.493%
+CMP_RC=0
+grep: /dev/shm/infinifabric-shell/284f2d3c2a3d4460a38efe2b52aa67c2/workspace/logs/nn28_cmp.log: No such file or directory
+TOTAL_SECS=957
+=== nn28 done 2026-11-10T05:54:28
+--- compare lines
+/public/home/aclsylqidf/infinifabric-users/users/7afc10d702784d51ae6d6035c6df9bd7/minimax_h3/logs/nn28_1109_094916_cmp.log:[task] reference_fl2va: using existing result: /public/home/aclsylqidf/infinifabric-users/users/7afc10d702784d51ae6d6035c6df9bd7/minimax_h3/cmp/reference_fl2va.mp4
+/public/home/aclsylqidf/infinifabric-users/users/7afc10d702784d51ae6d6035c6df9bd7/minimax_h3/logs/nn28_1109_094916_cmp.log:[task] infinilm_fl2va: using existing result: /dev/shm/infinifabric-shell/2138263df38b4310a438c4accf85e868/workspace/out/nl_50.mp4
+/public/home/aclsylqidf/infinifabric-users/users/7afc10d702784d51ae6d6035c6df9bd7/minimax_h3/logs/nn28_1109_094916_cmp.log:    Size:         PASS (PyTorch 768x928, InfiniLM 768x928)
+/public/home/aclsylqidf/infinifabric-users/users/7afc10d702784d51ae6d6035c6df9bd7/minimax_h3/logs/nn28_1109_094916_cmp.log:    Length:       PASS (PyTorch 124 frames, InfiniLM 124 frames)
+/public/home/aclsylqidf/infinifabric-users/users/7afc10d702784d51ae6d6035c6df9bd7/minimax_h3/logs/nn28_1109_094916_cmp.log:    Average SSIM: 79.874%
+/public/home/aclsylqidf/infinifabric-users/users/7afc10d702784d51ae6d6035c6df9bd7/minimax_h3/logs/nn28_1109_094916_run.log:[done] Saved to: /dev/shm/infinifabric-shell/2138263df38b4310a438c4accf85e868/workspace/out/nl_50.mp4
+/public/home/aclsylqidf/infinifabric-users/users/7afc10d702784d51ae6d6035c6df9bd7/minimax_h3/logs/nn28_1109_215217_run.log:[done] Saved to: /dev/shm/infinifabric-shell/500d0a4b14444bd9b1d244da121891a3/workspace/run-2d8f9760653b443ca3f50707d1dcb558/.run/out/nl_50.mp4
+/public/home/aclsylqidf/infinifabric-users/users/7afc10d702784d51ae6d6035c6df9bd7/minimax_h3/logs/nn28_1110_053831_run.log:[done] Saved to: /dev/shm/infinifabric-shell/284f2d3c2a3d4460a38efe2b52aa67c2/workspace/out/nl_50.mp4
+JOB_END 2026-11-10T05:54:28

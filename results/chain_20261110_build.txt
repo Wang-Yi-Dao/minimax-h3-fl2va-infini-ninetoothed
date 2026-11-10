@@ -1,0 +1,87 @@
+JOB_START 2026-11-10T05:03:15 nproc=128 uid=230030 chain=/public/home/aclsylqidf/infinifabric-users/users/7afc10d702784d51ae6d6035c6df9bd7/minimax_h3/chain/20261110_050314
+REPO_TRY_FAIL https://ghproxy.net/ secs=101
+REPO_TGZ src=https://gh-proxy.com/ secs=12 dir=minimax-h3-fl2va-infini-ninetoothed-main
+--- repo ready, inputs:
+  IN  
+  IN 3759864 InfiniCore-snapshot-mit.tar.gz
+  IN 265 SHA256SUMS
+  IN 52648 infinicore_ninetoothed_hygon.patch
+  IN 3684 kb7.py
+  IN 2457374 kernels_deployed.tgz
+  IN 8490 mha_ninetoothed_hygon.cc
+  IN 19254 overlay.tar.gz
+  IN 1520 pre_ctxid.c
+SHA InfiniCore-snapshot-mit.tar.gz: OK
+SHA overlay.tar.gz: OK
+SHA kernels_deployed.tgz: OK
+XM_PREBUILT_PICK /public/home/aclsylqidf/infinifabric-users/users/7afc10d702784d51ae6d6035c6df9bd7/minimax_h3/chain/20261110_045748/xmake-toolchain.tgz 1666845 B
+WORK_TMPFS /dev/shm/infinifabric-preparation/shell-13dca2a1c46d46ada2251b9d8f0b8666/reprobuild.lfmUrc
+--- build start 2026-11-10T05:05:10
+REPRO_START 2026-11-10T05:05:10 root=/public/home/aclsylqidf/infinifabric-users/users/7afc10d702784d51ae6d6035c6df9bd7/minimax_h3/chain/20261110_050314/minimax-h3-fl2va-infini-ninetoothed-main work=/dev/shm/infinifabric-preparation/shell-13dca2a1c46d46ada2251b9d8f0b8666/reprobuild.lfmUrc
+PY=python3.11 Python 3.11.9 DTK=/opt/dtk J=64 ARCH=gfx936
+InfiniCore-snapshot-mit.tar.gz: OK
+overlay.tar.gz: OK
+kernels_deployed.tgz: OK
+SHA_OK all three inputs
+--- download xmake 3.1.2 source tree
+XMAKE_DL_FAIL https://github.com/xmake-io/xmake/releases/download/v3.1.2/xmake-v3.1.2.tar.gz <urlopen error Tunnel connection failed: 502 NETWORK_PUBLIC_CONNECTION_FAILED>
+XMAKE_TGZ_BYTES 3369873 https://ghproxy.net/https://github.com/xmake-io/xmake/releases/download/v3.1.2/xmake-v3.1.2.tar.gz
+--- download pybind11 3.1.0 source
+PYBIND11_SDIST https://files.pythonhosted.org/packages/76/f3/95b0f40b31df41dbfe6bb0857419c9442c15839cbac4796f1c26ae0b6081/pybind11-3.1.0.tar.gz
+PYBIND11_ROOT /public/home/aclsylqidf/infinifabric-users/users/7afc10d702784d51ae6d6035c6df9bd7/minimax_h3/chain/20261110_050314/minimax-h3-fl2va-infini-ninetoothed-main/.deps/pybind11-3.1.0 hdr True
+XMAKE_TGZ=3369873 PYBIND11_ROOT=/public/home/aclsylqidf/infinifabric-users/users/7afc10d702784d51ae6d6035c6df9bd7/minimax_h3/chain/20261110_050314/minimax-h3-fl2va-infini-ninetoothed-main/.deps/pybind11-3.1.0
+--- 05:07:02 build 7 lines 0 err: === [step 1/6 thrust version shim (DTK thrust 2.3.2 vs CCCL 2.4.0 stat
+--- 05:08:33 build 7 lines 0 err: === [step 1/6 thrust version shim (DTK thrust 2.3.2 vs CCCL 2.4.0 stat
+--- 05:10:05 build 7 lines 0 err: === [step 1/6 thrust version shim (DTK thrust 2.3.2 vs CCCL 2.4.0 stat
+--- 05:11:37 build 7 lines 0 err: === [step 1/6 thrust version shim (DTK thrust 2.3.2 vs CCCL 2.4.0 stat
+--- 05:13:09 build 7 lines 0 err: === [step 1/6 thrust version shim (DTK thrust 2.3.2 vs CCCL 2.4.0 stat
+--- 05:14:40 build 7 lines 0 err: === [step 1/6 thrust version shim (DTK thrust 2.3.2 vs CCCL 2.4.0 stat
+--- 05:16:11 build 7 lines 0 err: === [step 1/6 thrust version shim (DTK thrust 2.3.2 vs CCCL 2.4.0 stat
+--- 05:17:42 build 7 lines 0 err: === [step 1/6 thrust version shim (DTK thrust 2.3.2 vs CCCL 2.4.0 stat
+--- 05:19:14 build 7 lines 0 err: === [step 1/6 thrust version shim (DTK thrust 2.3.2 vs CCCL 2.4.0 stat
+--- 05:20:45 build 311 lines 1 err: === [step 6/6 xmake build] 2026-11-10T05:19:34
+--- 05:22:18 build 1945 lines 1 err: === [step 6/6 xmake build] 2026-11-10T05:19:34
+--- 05:23:49 build 2133 lines 1 err: === [step 6/6 xmake build] 2026-11-10T05:19:34
+--- 05:25:20 build 2331 lines 1 err: === [step 6/6 xmake build] 2026-11-10T05:19:34
+--- 05:26:52 build 2423 lines 1 err: === [step 6/6 xmake build] 2026-11-10T05:19:34
+--- 05:28:23 build 2532 lines 1 err: === [step 6/6 xmake build] 2026-11-10T05:19:34
+--- 05:29:54 build 2656 lines 1 err: === [step 6/6 xmake build] 2026-11-10T05:19:34
+--- 05:31:25 build 2741 lines 1 err: === [step 6/6 xmake build] 2026-11-10T05:19:34
+--- 05:32:57 build 2889 lines 1 err: === [step 6b/6 python binding (_infinicore)] 2026-11-10T05:32:35
+BUILD_EXIT=0
+            DISPATCH(double, int32_t);
+src/infiniop/ops/index_copy/cpu/index_copy_cpu.cc:111:5: note: expanded from macro 'DISPATCH'[0m
+            DISPATCH(float, int32_t);
+src/infiniop/ops/index_add/cpu/index_add_cpu.cc:108:5: note: expanded from macro 'DISPATCH'
+            DISPATCH(double, int32_t);
+src/infiniop/ops/index_add/cpu/index_add_cpu.cc:108:5: note: expanded from macro 'DISPATCH'[0m
+        DISPATCH_OUT(float);
+src/infiniop/ops/float_power/cpu/float_power_cpu.cc:115:14: note: expanded from macro 'DISPATCH_OUT'
+        DISPATCH_OUT(float);
+src/infiniop/ops/float_power/cpu/float_power_cpu.cc:118:14: note: expanded from macro 'DISPATCH_OUT'[0m
+SO _infinicore.cpython-311-x86_64-linux-gnu.so 1612400
+SO libinfiniop.so 30752880
+SO libinfinicore_cpp_api.so 13264224
+SO libinfinirt.so 48184
+SO libinfiniccl.so 52104
+SO_COUNT=5/5
+REPRO_OK secs=1713 libs=/dev/shm/infinifabric-preparation/shell-13dca2a1c46d46ada2251b9d8f0b8666/reprobuild.lfmUrc/ic/build/linux/x86_64/release
+next (end-to-end + official compare): CRB_LIBS=/dev/shm/infinifabric-preparation/shell-13dca2a1c46d46ada2251b9d8f0b8666/reprobuild.lfmUrc/ic/build/linux/x86_64/release bash jobs/run_tp8_fl2va.sh 50 1600
+REPRO_EXIT=0
+SO _infinicore.cpython-311-x86_64-linux-gnu.so 1612400
+SO libinfiniop.so 30752880
+SO libinfinicore_cpp_api.so 13264224
+SO libinfinirt.so 48184
+SO libinfiniccl.so 52104
+SO_COUNT=5/5
+MAN chain /public/home/aclsylqidf/infinifabric-users/users/7afc10d702784d51ae6d6035c6df9bd7/minimax_h3/chain/20261110_050314
+MAN created 2026-11-10T05:33:45
+MAN repo src=github main (tarball)
+MAN reproduce_exit 0  so_count 5
+MAN 41d649f73e209c42ee4949761eb63ca75eeff918d49ce89c5aba594f95f3dc04  _infinicore.cpython-311-x86_64-linux-gnu.so
+MAN 81183241721bbacca06afa8a269ec3c2bbe80a09f74527a6690d53d4a35d2bf3  libinfiniccl.so
+MAN b39722882f7846b0ffd4016414803ad79a72ad30604f3d6176b9ba168c37dcb9  libinfinicore_cpp_api.so
+MAN a3847eeaba99fd23d7e2dce894a0002a9e2835cd8d82340bb46f6ebeb78b46fc  libinfiniop.so
+MAN 1993bdeba63c137758fc2cb9d8ae772d6fdeb94999de260373ab52e1f4c7a467  libinfinirt.so
+CHAIN_OK /public/home/aclsylqidf/infinifabric-users/users/7afc10d702784d51ae6d6035c6df9bd7/minimax_h3/chain/20261110_050314
+JOB_END 2026-11-10T05:33:56
