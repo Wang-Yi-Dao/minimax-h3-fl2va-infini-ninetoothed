@@ -31,7 +31,7 @@ fetch_repo() {
     if curl -fsSL --max-time 100 -o repo.tgz "${pre}${REL}" 2>/dev/null && [ -s repo.tgz ]; then
       tar xzf repo.tgz 2>/dev/null
       d=$(ls -d minimax-h3-fl2va-infini-ninetoothed-* 2>/dev/null | grep -v tar.gz | head -1)
-      [ -n "$d" ] && { echo "REPO_TGZ src=${pre:-direct} secs=$(( $(date +%s)-t0 ))"; echo "$d"; return 0; }
+      [ -n "$d" ] && { echo "REPO_TGZ src=${pre:-direct} secs=$(( $(date +%s)-t0 ))" >&2; echo "$d"; return 0; }
     fi
     echo "REPO_TRY_FAIL ${pre:-direct}" >&2
   done
