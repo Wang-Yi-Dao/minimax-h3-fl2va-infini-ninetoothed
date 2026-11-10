@@ -27,7 +27,6 @@ CMP_RC=0
 本地 ffprobe 复核为 h264 768×928 / 124 帧 / 24 fps / 含 aac 音轨，与官方 compare 的 `Size` / `Length` PASS 一致；
 该文件较大未入库，如需可与平台作业 `e2b965628ec0482bbb61475434099412` 的记录核对。
 
-
 ## 结果截图
 
 正式运行：官方 `examples/minimax_h3_compare.py` 输出 `Average SSIM: 80.012%`、`CMP_RC=0`。
@@ -131,11 +130,23 @@ PYTHONPATH="$W/pylibs:$HOME/pylibs_extra:$PYTHONPATH" python3 -u \
 本仓库不只给结果，也给出**能重建那一份 InfiniCore 的完整输入**：`build/` 与 `src/` 下三个 tar 包，
 全部是源码（无二进制产物），sha256 见 `src/SHA256SUMS`。
 
+最快的入口是一条命令（`build/reproduce.sh` 把三份输入校验、xmake 工具链、InfiniCore 五个 .so 串起来）：
+
+```bash
+bash build/reproduce.sh $HOME/tmp/repro-build all   # 有可写本地盘可换 /dev/shm/repro-build（更快）
+# 产物：$HOME/tmp/repro-build/ic/build/linux/x86_64/release 下五个 .so
+# 不传工作目录时脚本按 $LOCAL_SCRATCH → /tmp → $HOME/tmp 自动探活
+```
+
+三份输入（全部是源码，无二进制产物）：
+
 | 输入 | 内容 | 大小 / sha256 前缀 |
 |---|---|---|
 | `src/InfiniCore-snapshot-mit.tar.gz` | 上游 InfiniCore 快照（MIT，含 LICENSE） | 3,759,864 B / `620d40e2` |
 | `src/overlay.tar.gz` | 我们改动的 9 个源文件，根为 `ic/` | 19,254 B / `f1f28f73` |
 | `src/kernels_deployed.tgz` | 出片所用库的九齿 kernel 源码 `ic/build/ninetoothed/`（106 文件） | 2,457,374 B / `fbf98247` |
+
+手工分段（也就是三段链，为什么这么拆见本节末尾的实测表）：
 
 ```bash
 # 0) 工具链：需要 xmake ≥ 3.1.2。官方 bundle 链接 GLIBC_2.38，本镜像只有 2.35，所以 xmake
