@@ -147,6 +147,12 @@ bash jobs/run_tp8_fl2va.sh 50 1600
 |---|---|---|---|
 | `jobs/repro_xmake_step.sh` | 从 xmake 3.1.2 源码编工具链（内存盘里编，AFS 上只放成品） | `XMP_OK` el=218 s | `chain/20261110_045748/xmake-toolchain.tgz` 1,666,845 B（sha256 `b201aeb7…`） |
 | `jobs/repro_build.sh` | 校验三份 sha256 → 解快照/overlay → 打补丁 → 编五个 .so | `REPRO_OK secs=1713`（作业总耗时 1841 s） | `chain/20261110_050314/libs` |
+
+一条实情：chain-b1 提交时脚本还没认链上工具链（`XM_PREBUILT` 当时只在 `STAGE=build` 生效），
+所以它在作业内又自举了一遍 xmake（内存盘上约 2 分钟，日志里可见 `--- download xmake 3.1.2 source tree`），
+随后照常编出五个 `.so`。这不影响结论（整条链 100% 从源码起，没有任何预置二进制），
+只是说那一次没走「读链上 tgz」的分支；该分支此后已修好（任何 `STAGE` 都优先用链上
+`xmake-toolchain.tgz`），慢盘环境下用它可省掉重复自举。
 | `jobs/repro_run.sh` | 只读 chain 里的 .so，跑 50 步 FL2VA + 官方 compare | `RUN_RC=0 failed=0 run_secs=909`（18.18 s/step） | `nl_50.mp4` + compare 结果 |
 
 三次重建的产物对齐情况：

@@ -234,6 +234,9 @@ anywhere in it:
 ```
 xmake:   XMP_OK el=218 s      xmake-toolchain.tgz 1,666,845 B  sha256 b201aeb7...
 build:   REPRO_OK secs=1713   job 1841 s   work dir on tmpfs (mktemp -d $TMPDIR/...)
+         (that job predates the XM_PREBUILT fix, so it bootstrapped xmake from
+          source inside itself again -- about two minutes on tmpfs, visible as
+          "--- download xmake 3.1.2 source tree"; both paths start from source)
          libinfiniop.so 30,752,880 B    libinfinicore_cpp_api.so 13,264,224 B
          libinfinirt.so 48,184 B        libinfiniccl.so 52,104 B
          _infinicore.cpython-311-x86_64-linux-gnu.so 1,612,400 B
