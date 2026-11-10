@@ -116,11 +116,13 @@ BIN="$XSRC/build/xmake"
 if [ -x "$BIN" ]; then
   "$BIN" --version || true
   OUT="$CH/xmake-toolchain.tgz"
-  mkdir -p "$WD/pack"
-  cp -f "$BIN" "$WD/pack/xmake"
-  # xmake 运行时要自己的 Lua 程序树，一起带上
-  if [ -d "$XSRC/xmake" ]; then ( cd "$XSRC" && tar cf "$WD/pack/xmake-prog.tar" xmake ); fi
-  ( cd "$WD/pack" && tar cf - . ) > "$OUT.raw" && mv -f "$OUT.raw" "$OUT"
+  # 必须打成 *安装布局* bin/xmake + share/xmake：下游 from_scratch.sh 用
+  # dirname(dirname(XM_BIN))/share/xmake 定位 Lua 程序树，源码树的 build/xmake
+  # 会被解析成 <src>/share/xmake 而找不到程序目录。
+  rm -rf "$WD/inst"; mkdir -p "$WD/inst/bin" "$WD/inst/share"
+  cp -f "$BIN" "$WD/inst/bin/xmake"; chmod +x "$WD/inst/bin/xmake"
+  if [ -d "$XSRC/xmake" ]; then cp -a "$XSRC/xmake" "$WD/inst/share/xmake"; fi
+  ( cd "$WD/inst" && tar czf "$OUT.raw" . ) && mv -f "$OUT.raw" "$OUT"
   echo "XMP_ARCHIVE $OUT bytes=$(stat -c%s "$OUT")"
   sha256sum "$OUT" | tee "$CH/MANIFEST.txt"
   chmod -R a+rwX "$CH" 2>/dev/null
