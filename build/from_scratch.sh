@@ -92,7 +92,15 @@ PYEOF
 grep -l h3_pad80 "$W/ic/src/infinicore/ops/multi_head_attention/hygon_nt/mha_ninetoothed_hygon.cc" >/dev/null || { echo "OVL_VERIFY_FAIL"; exit 1; }
 echo "$OVL_SHA" > "$W/ic/.crb_overlay_sha"
 mkdir -p "$W/logs"
-if [ "${CRB_RESUME:-0}" = 1 ] && [ -n "$XM_BIN" ] && [ -x "$XM_BIN" ]; then
+if [ -n "${XM_PREBUILT:-}" ] && [ -s "${XM_PREBUILT}" ]; then
+  # A toolchain built by an earlier job (see build/xmake_build.sh).  Compiling
+  # xmake here would cost ~30 min on this cluster's persistent storage, which
+  # does not fit in a single job window, so that one step gets its own job and
+  # hands the finished tree forward as one read-only archive.
+  rm -rf "$W/xm"; mkdir -p "$W/xm"
+  tar xzf "$XM_PREBUILT" -C "$W/xm" || { echo "XM_PREBUILT_UNPACK_FAIL"; exit 1; }
+  echo "xmake: unpacked prebuilt toolchain $XM_PREBUILT"
+elif [ "${CRB_RESUME:-0}" = 1 ] && [ -n "$XM_BIN" ] && [ -x "$XM_BIN" ]; then
   echo "xmake already extracted, reusing $XM_BIN"
 else
   rm -rf "$W/xm"; mkdir -p "$W/xm"
@@ -281,6 +289,8 @@ else
 fi
 
 stage "step 5a/6 xmake self-patches (tolerant mkdir on AFS, build cache off)"
+# 官方 bundle 的 Lua 程序树是内嵌的，没有可补丁的文件：此时 XM_SHARE 为空或不存在。
+if [ -n "${XM_SHARE:-}" ] && [ -d "$XM_SHARE" ]; then
 "$PY" - "$XM_SHARE" <<'PYEOF'
 import io, os, sys
 X = sys.argv[1]
@@ -313,6 +323,9 @@ if os.path.isfile(p):
     else:
         print('cache PATTERN_MISS')
 PYEOF
+else
+  echo "xmake program dir absent (bundle mode) -- self-patches skipped"
+fi
 stage "step 5/6 xmake configure"
 # xmake resolves the toolchain from PATH; without the DTK llvm directory it picks
 # up the system g++ (GCC pragma diagnostics are errors there: -Werror=unknown-pragmas).
@@ -326,7 +339,10 @@ for c in /usr/lib/gcc/x86_64-linux-gnu/*/include /usr/lib/gcc/*/*/include /opt/d
   if [ -f "$c/omp.h" ]; then OMP_INC="-I$c"; break; fi
 done
 echo "OMP_INC=${OMP_INC:-none}"
-export XMAKE_ROOT=y XMAKE_GLOBALDIR="$W/xmake-global" XMAKE_PROGRAM_DIR="$XM_SHARE"
+export XMAKE_ROOT=y XMAKE_GLOBALDIR="$W/xmake-global"
+# 源码编译出的 xmake 要指向自己的 Lua 程序树；官方 bundle 自带程序树，
+# 硬塞一个不存在的 XMAKE_PROGRAM_DIR 会让它启动失败。
+if [ -n "${XM_SHARE:-}" ] && [ -d "$XM_SHARE" ]; then export XMAKE_PROGRAM_DIR="$XM_SHARE"; fi
 export INFINI_ROOT="$W/.infini"
 cd "$W/ic" || exit 1
 "$XM_BIN" f -y -m release --hygon-dcu=y --hygon-arch="$ARCH" \

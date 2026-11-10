@@ -10,16 +10,30 @@
 # 三份源码输入随包在 src/ 下，脚本先按 src/SHA256SUMS 校验再构建；
 # 构建依赖（xmake 3.1.2 源码树、pybind11 3.1.0 头文件）由脚本自己下载，
 # 下载失败可用 GH_MIRROR 换镜像，或预置 XM_TGZ / PYBIND11_ROOT。
-# 工作目录默认落在本地盘：上游快照 7.5k 个小文件解在 AFS 上要 19 分钟，
-# 本地盘几十秒；构建结束后把 5 个 .so 拷到想要的位置即可。
+# 工作目录按顺序探活：$LOCAL_SCRATCH、/tmp、$HOME/tmp/repro-build，第一个能写的就用。
+# 快照解包本身不慢：本集群实测 916 个小文件 9 秒、7469 个成员约 40-75 秒，
+# 真正的耗时是编 xmake 与编 InfiniCore，所以工具链优先用官方预编译 bundle。
 # 产物：<work>/ic/build/linux/x86_64/release 下五个 .so。
 # 端到端出片 + 官方评分见 build/README.md（jobs/run_tp8_fl2va.sh，另需模型权重与参考视频）。
 set -uo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/.." && pwd)
-LOCAL=${LOCAL_SCRATCH:-/dev/shm/repro-build}
-W=${1:-$LOCAL}
+# 工作目录：优先本地盘（快），没有可写本地盘就退回持久盘。
+# 这套集群实测 /dev/shm、/tmp、/var/tmp 虽然是 1777 权限，mkdir 仍被拒，
+# 只有 $HOME 可写，所以下面按顺序探活（真的写一个文件），第一个能写的就用。
+pick_work() {
+  for d in ${LOCAL_SCRATCH:-/dev/shm/repro-build} /tmp/repro-build "$HOME/tmp/repro-build"; do
+    mkdir -p "$d" 2>/dev/null || continue
+    touch "$d/.probe" 2>/dev/null || continue
+    rm -f "$d/.probe"; echo "$d"; return 0
+  done
+  return 1
+}
+if [ -n "${1:-}" ]; then W="$1"; else W=$(pick_work) || { echo "WORKDIR_NONE"; exit 1; }; fi
+# 阶段：all = 一次做完（慢机器可能超出单作业时限）；deps = 只做依赖与 xmake
+# 工具链并打包；build = 用 ${XM_PREBUILT} 里已编好的 xmake 只编 InfiniCore。
+STAGE=${2:-all}
 PY=${PY:-python3.11}
 DTK=${DTK:-/opt/dtk}
 J=${J:-32}
@@ -71,6 +85,16 @@ else:
 PYEOF
 fi
 
+# ---- 2b. 只做工具链：编 xmake 并打包，交给下一个作业用 ----
+# 放在 pybind11 之前：工具链阶段用不到 pybind11，早退能省掉一次下载与解包。
+if [ "$STAGE" = deps ]; then
+  OUT=${XM_OUT:-$DEPS/xmake-built.tgz}
+  W="$W" XM_TGZ="$XM_TGZ" OUT="$OUT" J="$J" bash "$HERE/xmake_build.sh" || { echo "DEPS_FAIL"; exit 1; }
+  echo "DEPS_OK xmake_prebuilt=$OUT $(stat -c%s "$OUT" 2>/dev/null) B"
+  echo "next: 作业2 用 XM_PREBUILT=$OUT bash build/reproduce.sh <work2> build"
+  exit 0
+fi
+
 PB=${PYBIND11_ROOT:-$DEPS/pybind11-3.1.0}
 if [ ! -f "$PB/include/pybind11/pybind11.h" ]; then
   echo "--- download pybind11 3.1.0 source"
@@ -96,6 +120,18 @@ export IC_TGZ=$SRC/InfiniCore-snapshot-mit.tar.gz
 export OVL_TGZ=$SRC/overlay.tar.gz
 export CRB_KERNELS_TGZ=$SRC/kernels_deployed.tgz
 export XMAKE_TGZ="$XM_TGZ" CRB_SCRATCH=$W/scratch PYBIND11_ROOT="$PB"
+# CRB_RESUME=1: reuse the source tree and xmake build artifacts left by an
+# earlier run in the same work directory. A single job has a hard deadline
+# (3200 s on this platform); on a slow filesystem use this to continue.
+export CRB_RESUME=${CRB_RESUME:-0}
+# build 阶段必须有已编好的 xmake：没有它 from_scratch.sh 会退回源码编译，
+# 而这一步在慢速持久盘上要 30 分钟以上，会直接撞到作业时限。
+if [ "$STAGE" = build ]; then
+  XM_PREBUILT=${XM_PREBUILT:-$DEPS/xmake-built.tgz}
+  [ -s "$XM_PREBUILT" ] || { echo "XM_PREBUILT_MISSING $XM_PREBUILT"; exit 1; }
+  export XM_PREBUILT
+  echo "prebuilt xmake: $XM_PREBUILT $(stat -c%s "$XM_PREBUILT") B"
+fi
 # WHEELS 可指向本地轮子目录以跳过下载；不设则由 from_scratch.sh 去 PyPI 取。
 [ -n "${WHEELS:-}" ] && export WHEELS
 LOG=$W/from_scratch.log
