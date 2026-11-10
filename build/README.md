@@ -198,29 +198,9 @@ every run, so a changed overlay always wins.
 
 ## Verification run (clean room, published inputs only)
 
-The published numbers below came from jobs that do exactly this: take only the
-three artefacts above (verified against `../src/SHA256SUMS`), rebuild the five
-libraries in a fresh work directory, then run the published 50-step FL2VA pipeline
-plus `examples/minimax_h3_compare.py` with those libraries. The packaged equivalent
-is `../jobs/repro_build.sh` followed by `../jobs/repro_run.sh`.
-
-```
-check:   SHA_OK snapshot.tgz / SHA_OK overlay.tar.gz / SHA_OK kernels.tgz
-build:   BUILD_EXIT=0, FRESH_SO_COUNT=5
-         libinfiniop.so 30,752,880 B    libinfinicore_cpp_api.so 13,297,376 B
-         libinfinirt.so 48,184 B        libinfiniccl.so 52,104 B
-         _infinicore.cpython-311-x86_64-linux-gnu.so 1,612,400 B
-run:     RUN_RC=0, 50 steps, 18.2 s/step (910 s), out 1,619,081 B
-compare: Size PASS / Length PASS / Average SSIM 79.907% (CMP_RC=0)
-total:   960 s of wall clock for build + run + compare on 8 cards
-```
-
-This is the same 79-81% band as the released run (80.012%), from inputs that
-contain no binary produced by this project.
-
-### The three-job chain, measured end to end (2026-11-10)
-
-The published chain is
+The published numbers below came from the packaged chain, run on 8 cards in a fresh
+work directory that took only the three artefacts above (verified against
+`../src/SHA256SUMS`) and no prebuilt binary anywhere in it:
 
 ```
 jobs/repro_xmake_step.sh  ->  chain/<ts>/xmake-toolchain.tgz
@@ -228,33 +208,29 @@ jobs/repro_build.sh       ->  chain/<ts>/libs  (five .so)
 jobs/repro_run.sh         ->  nl_50.mp4 + official compare
 ```
 
-and it was run as exactly that chain on 8 cards, with no prebuilt binary
-anywhere in it:
-
 ```
 xmake:   XMP_OK el=218 s      xmake-toolchain.tgz 1,666,845 B  sha256 b201aeb7...
-build:   REPRO_OK secs=1713   job 1841 s   work dir on tmpfs (mktemp -d $TMPDIR/...)
+build:   REPRO_OK secs=1713   job 1841.813 s   work dir on tmpfs (mktemp -d $TMPDIR/...)
          (that job predates the XM_PREBUILT fix, so it bootstrapped xmake from
           source inside itself again -- about two minutes on tmpfs, visible as
           "--- download xmake 3.1.2 source tree"; both paths start from source)
          libinfiniop.so 30,752,880 B    libinfinicore_cpp_api.so 13,264,224 B
          libinfinirt.so 48,184 B        libinfiniccl.so 52,104 B
          _infinicore.cpython-311-x86_64-linux-gnu.so 1,612,400 B
-run:     RUN_RC=0, 50 steps, 18.18 s/step (909 s)
+run:     RUN_RC=0, failed=0, 50 steps, 18.18 s/step (909 s)
 compare: Size PASS / Length PASS / Average SSIM 79.493% (CMP_RC=0)
-chain:   ~3063 s of job time across the three jobs
+chain:   job time 219.099 + 1841.813 + 1004.498 s  (card-seconds 1753 + 14735 + 8036)
 ```
 
-All five library sizes match the second clean rebuild byte for byte, and the
-similarity lands in the same band for the fifth independent run. Two things
-make this work and are easy to get wrong: the toolchain has to be repacked as
-an **install layout** (`bin/xmake` + `share/xmake`) because `from_scratch.sh`
-derives the program dir from `dirname(dirname($XM_BIN))`, and the build work
-directory must live on tmpfs (`$TMPDIR` is writable inside a job even though
-`/tmp` and `/dev/shm` roots are not) - the same build that needs more than 30
-minutes on AFS finishes in under 29 minutes including the wheel download on
-tmpfs. Logs: `../results/chain_20261110_xmake.txt`, `..._build.txt`,
-`..._run.txt`.
+All five library sizes match the released libraries byte for byte, and the similarity
+lands in the same band as the released run (80.012%). Two things make this work and
+are easy to get wrong: the toolchain has to be repacked as an **install layout**
+(`bin/xmake` + `share/xmake`) because `from_scratch.sh` derives the program dir from
+`dirname(dirname($XM_BIN))`, and the build work directory must live on tmpfs
+(`$TMPDIR` is writable inside a job even though `/tmp` and `/dev/shm` roots are not) -
+the same build that needs more than 30 minutes on AFS finishes in under 29 minutes
+including the wheel download on tmpfs. Logs: `../results/chain_20261110_xmake.txt`,
+`..._build.txt`, `..._run.txt`.
 
 ## Why the scratch directory matters
 

@@ -67,11 +67,11 @@ build/    bld_infinicore.sh（InfiniCore 构建配方）、rebuild_and_repack.sh
           xmake_build.sh（xmake 源码编译封装）
 results/  compare_nn38_50steps.txt（官方 compare 原始输出，含同配置重跑）、ab_2step_table.md（2 步 A/B 实测）、
           compare_nn40_freshlibs.txt（删除 ATen 通道后重编的库的官方 compare：79.462%，附同日对照跑 79.874%）、
-          rebuild_check.txt（第三方从源码重建的实测记录：79.907%）、
-          rebuild_check_20261110.txt（第二次干净重建的完整作业日志：79.402%，15.73 s/step）
+          chain_20261110_xmake.txt / _build.txt / _run.txt（最新一次从源码重建的三段链完整作业日志，
+          官方 compare 79.493%）
 docs/     初赛实验报告.md、课程报告.md、提交清单.md
 figures/  compare_nn38_platform.png（作业卡片 + 结果区）、compare_nn38_log.png（日志框内的官方 compare 输出，80.012%）、
-          compare_crb_platform.png / compare_crb_log.png（重建作业 2d8f9760… 的作业详情与官方 compare 79.402%）、
+          compare_chain_jobs.png / compare_chain_log.png（重建链三个作业的列表与日志，官方 compare 79.493%）、
           video_frames_nl50.png（成片第 1/61/124 帧抽帧对照）
 ```
 
@@ -140,35 +140,29 @@ export CRB_LIBS=<上一步的 build-work>/ic/build/linux/x86_64/release
 bash jobs/run_tp8_fl2va.sh 50 1600
 ```
 
-实测三次（8 卡，干净工作区，只喂上面三个输入）。三个作业构成一条链，**没有任何预置二进制包**：
-工具链由 xmake 源码编出，下游作业只读继承上游产物：
+实测（8 卡，干净工作区，只喂上面三个输入）。三个作业构成一条链，**没有任何预置二进制包**：
+工具链由 xmake 源码编出，下游作业只读继承上游产物。
 
 | 作业 | 做什么 | 实测 | 产物 |
 |---|---|---|---|
-| `jobs/repro_xmake_step.sh` | 从 xmake 3.1.2 源码编工具链（内存盘里编，AFS 上只放成品） | `XMP_OK` el=218 s | `chain/20261110_045748/xmake-toolchain.tgz` 1,666,845 B（sha256 `b201aeb7…`） |
-| `jobs/repro_build.sh` | 校验三份 sha256 → 解快照/overlay → 打补丁 → 编五个 .so | `REPRO_OK secs=1713`（作业总耗时 1841 s） | `chain/20261110_050314/libs` |
+| `jobs/repro_xmake_step.sh` | 从 xmake 3.1.2 源码编工具链（内存盘里编，AFS 上只放成品） | `XMP_OK`，作业 219.099 s / 1753 卡秒 | `chain/20261110_045748/xmake-toolchain.tgz` 1,666,845 B（sha256 `b201aeb7…`） |
+| `jobs/repro_build.sh` | 校验三份 sha256 → 解快照/overlay → 打补丁 → 编五个 .so | `REPRO_OK secs=1713`，作业 1841.813 s / 14735 卡秒 | `chain/20261110_050314/libs` |
+| `jobs/repro_run.sh` | 只读 chain 里的 .so，跑 50 步 FL2VA + 官方 compare | `RUN_RC=0 failed=0`，18.18 s/step（909 s），作业 1004.498 s / 8036 卡秒 | `nl_50.mp4` + compare 结果 |
+
+产物与结果：
+
+| 项目 | 实测值 |
+|---|---|
+| 五个 `.so` | `libinfiniop.so` 30,752,880 B、`libinfinicore_cpp_api.so` 13,264,224 B、`libinfinirt.so` 48,184 B、`libinfiniccl.so` 52,104 B、`_infinicore.cpython-311-x86_64-linux-gnu.so` 1,612,400 B |
+| 官方 compare | `Size: PASS (768x928)`、`Length: PASS (124 frames)`、**`Average SSIM: 79.493%`**、`CMP_RC=0` |
+| 与正式运行对照 | 正式运行 **80.012%**（同配置重跑 79.150%），重建结果与它同属 79%–80% 一档 |
 
 一条实情：chain-b1 提交时脚本还没认链上工具链（`XM_PREBUILT` 当时只在 `STAGE=build` 生效），
 所以它在作业内又自举了一遍 xmake（内存盘上约 2 分钟，日志里可见 `--- download xmake 3.1.2 source tree`），
-随后照常编出五个 `.so`。这不影响结论（整条链 100% 从源码起，没有任何预置二进制），
-只是说那一次没走「读链上 tgz」的分支；该分支此后已修好（任何 `STAGE` 都优先用链上
+随后照常编出五个 `.so`；整条链仍是 100% 从源码起。该分支此后已修好（任何 `STAGE` 都优先用链上
 `xmake-toolchain.tgz`），慢盘环境下用它可省掉重复自举。
-| `jobs/repro_run.sh` | 只读 chain 里的 .so，跑 50 步 FL2VA + 官方 compare | `RUN_RC=0 failed=0 run_secs=909`（18.18 s/step） | `nl_50.mp4` + compare 结果 |
 
-三次重建的产物对齐情况：
-
-| 运行 | libinfinicore_cpp_api.so | 50 步速度 | 官方 compare | 全流程 |
-|---|---|---|---|---|
-| 首轮重建 | 13,297,376 B | 18.2 s/step（910 s） | Size/Length PASS，**SSIM 79.907%** | 960 s |
-| 次轮重建 `2d8f9760…` | 13,264,224 B | 15.73 s/step（773 s） | Size/Length PASS，**SSIM 79.402%** | 969 s |
-| 链式重建（含自举工具链）`64df9241…` | 13,264,224 B | 18.18 s/step（909 s） | Size/Length PASS，**SSIM 79.493%** | 三段共约 3063 s |
-
-其余四个 so 三次字节数一致：`libinfiniop.so` 30,752,880 B、`libinfinirt.so` 48,184 B、
-`libinfiniccl.so` 52,104 B、`_infinicore.cpython-311-x86_64-linux-gnu.so` 1,612,400 B。
-五个 so 与首次发布的库**逐字节同尺寸**，官方 compare 落在 79.4%–79.9%；连同正式运行 80.012% 与
-同配置重跑 79.150%，五个独立运行点同属 79%–80% 一档。
-原始日志：`results/rebuild_check.txt`、`results/rebuild_check_20261110.txt`、
-`results/chain_20261110_xmake.txt`、`results/chain_20261110_build.txt`、`results/chain_20261110_run.txt`；
+原始日志：`results/chain_20261110_xmake.txt`、`results/chain_20261110_build.txt`、`results/chain_20261110_run.txt`；
 细节与踩坑见 `build/README.md`。
 
 ## 已知限制 / 未完成
