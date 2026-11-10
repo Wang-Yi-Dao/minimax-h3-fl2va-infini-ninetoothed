@@ -35,13 +35,25 @@ D=$(fetch_repo) || { echo "REPO_FAIL"; echo "JOB_END $(date -u +%FT%T)"; exit 1;
 cd "$CH/$D" || exit 1
 echo "--- repo ready, inputs:"; ls -l src | awk '{print "  IN",$5,$9}'
 ( cd src && sha256sum -c --strict SHA256SUMS 2>&1 | cut -c1-60 ) | sed 's/^/SHA /'
-mkdir -p "$CH/work"
+# 工具链：默认取链上最新产物（上游 repro_xmake_step.sh 打的 tgz），也可用 XM_PREBUILT 显式指定。
+if [ -z "${XM_PREBUILT:-}" ]; then
+  XM_PREBUILT=$(ls -t "$H"/minimax_h3/chain/*/xmake-toolchain.tgz 2>/dev/null | head -1)
+  [ -n "$XM_PREBUILT" ] && echo "XM_PREBUILT_PICK $XM_PREBUILT $(stat -c%s "$XM_PREBUILT") B"
+fi
+if [ -n "${XM_PREBUILT:-}" ]; then export XM_PREBUILT; else echo "XM_PREBUILT_NONE"; fi
+# 构建目录优先用内存盘：这台节点 ${TMPDIR} 可写，AFS 上小文件构建极慢。
+if [ -d "${TMPDIR:-}" ] && W=$(mktemp -d "${TMPDIR}/reprobuild.XXXXXX" 2>/dev/null); then
+  WK=$W; echo "WORK_TMPFS $WK"
+else
+  WK=$CH/work; echo "WORK_AFS $WK"
+fi
+mkdir -p "$WK"
 echo "--- build start $(date -u +%FT%T)"
 PY=${PY:-python3.11} J=${J:-64} ARCH=${ARCH:-gfx936} \
-  bash build/reproduce.sh "$CH/work" all
+  bash build/reproduce.sh "$WK" all
 BRC=$?
 echo "REPRO_EXIT=$BRC"
-FR=$CH/work/ic/build/linux/x86_64/release
+FR=$WK/ic/build/linux/x86_64/release
 mkdir -p "$CH/libs"
 N=0
 for f in _infinicore.cpython-311-x86_64-linux-gnu.so libinfiniop.so libinfinicore_cpp_api.so libinfinirt.so libinfiniccl.so; do
