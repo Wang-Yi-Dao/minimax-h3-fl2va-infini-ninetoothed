@@ -44,6 +44,7 @@ D=$(fetch_repo) || { echo REPO_FAIL; exit 1; }
 cd "$D" || exit 1
 echo "--- repo ok, CRB_LIBS=$CH/libs"
 CRB_LIBS="$CH/libs" STEPS=$STEPS BUDGET=$BUDGET bash jobs/run_tp8_fl2va.sh "$STEPS" "$BUDGET" 2>&1 | tail -80
-echo "--- compare lines"
-grep -aE "Size:|Length:|Average SSIM|CMP_RC|mp4" $H/minimax_h3/logs/*.log 2>/dev/null | tail -8
+echo "--- compare lines (newest logs only)"
+NEW_LOGS=$(ls -t $H/minimax_h3/logs/*.log 2>/dev/null | head -3)
+[ -n "$NEW_LOGS" ] && grep -aE "Size:|Length:|Average SSIM|CMP_RC" $NEW_LOGS 2>/dev/null | tail -8
 echo "JOB_END $(date -u +%FT%T)"
