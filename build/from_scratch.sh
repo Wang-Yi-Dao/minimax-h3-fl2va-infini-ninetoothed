@@ -92,7 +92,12 @@ PYEOF
 grep -l h3_pad80 "$W/ic/src/infinicore/ops/multi_head_attention/hygon_nt/mha_ninetoothed_hygon.cc" >/dev/null || { echo "OVL_VERIFY_FAIL"; exit 1; }
 echo "$OVL_SHA" > "$W/ic/.crb_overlay_sha"
 mkdir -p "$W/logs"
-if [ -n "${XM_PREBUILT:-}" ] && [ -s "${XM_PREBUILT}" ]; then
+if [ -n "${XM_PREBUILT:-}" ] && [ -d "${XM_PREBUILT}" ]; then
+  # 目录形态的工具链（上游作业打包失败时的退化产物：bin/xmake + share/xmake 直传）
+  rm -rf "$W/xm"; mkdir -p "$W/xm"
+  cp -a "$XM_PREBUILT"/. "$W/xm"/ || { echo "XM_PREBUILT_DIR_COPY_FAIL"; exit 1; }
+  echo "xmake: copied prebuilt toolchain directory $XM_PREBUILT"
+elif [ -n "${XM_PREBUILT:-}" ] && [ -s "${XM_PREBUILT}" ]; then
   # A toolchain built by an earlier job (see build/xmake_build.sh).  Compiling
   # xmake here would cost ~30 min on this cluster's persistent storage, which
   # does not fit in a single job window, so that one step gets its own job and

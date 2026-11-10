@@ -126,7 +126,17 @@ if [ -x "$BIN" ]; then
   # 所以先在 tmpfs 里打包、再整文件复制到 AFS；若压缩仍失败，则退化为直接复制安装树目录。
   TMPTGZ="$WD/xmake-toolchain.tgz"
   OK=0
-  if ( cd "$WD/inst" && tar czf "$TMPTGZ" . ) && [ -s "$TMPTGZ" ]; then
+  # 注意：这台节点的 tar 调 gzip 子进程建包一律失败（tar/gzip 子进程 open 报
+  # "Function not implemented"，tmpfs 上同样复现，不是 AFS 的锅），改用 python tarfile 打包。
+  cat > "$WD/pack.py" <<'PYEOF'
+import os, tarfile
+out = os.environ["TMPTGZ"]
+with tarfile.open(out, "w:gz") as tf:
+    for name in sorted(os.listdir(".")):
+        tf.add(name, arcname=name)
+print("PY_TAR_BYTES", os.path.getsize(out))
+PYEOF
+  if ( cd "$WD/inst" && TMPTGZ="$TMPTGZ" python3 "$WD/pack.py" ); then
     CP_SECS0=$(date +%s)
     if cp -f "$TMPTGZ" "$OUT" && [ -s "$OUT" ]; then
       echo "XMP_ARCHIVE $OUT bytes=$(stat -c%s "$OUT") copy_secs=$(( $(date +%s) - CP_SECS0 ))"
