@@ -29,6 +29,9 @@ DEPS=${DEPS:-$ROOT/.deps}
 SRC=$ROOT/src
 T0=$(date +%s)
 
+mkdir -p "$W" 2>/dev/null
+if ! touch "$W/.w" 2>/dev/null; then echo "WORKDIR_NOT_WRITABLE $W"; exit 1; fi
+rm -f "$W/.w"
 echo "REPRO_START $(date -u +%FT%T) root=$ROOT work=$W"
 echo "PY=$PY $("$PY" -V 2>&1) DTK=$DTK J=$J ARCH=$ARCH"
 
