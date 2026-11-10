@@ -126,7 +126,11 @@ export XMAKE_TGZ="$XM_TGZ" CRB_SCRATCH=$W/scratch PYBIND11_ROOT="$PB"
 export CRB_RESUME=${CRB_RESUME:-0}
 # build 阶段必须有已编好的 xmake：没有它 from_scratch.sh 会退回源码编译，
 # 而这一步在慢速持久盘上要 30 分钟以上，会直接撞到作业时限。
-if [ "$STAGE" = build ]; then
+if [ -n "${XM_PREBUILT:-}" ]; then
+  # 链上上游作业给的工具链（tgz 或已解开的安装目录），任何 STAGE 都优先使用。
+  export XM_PREBUILT
+  echo "prebuilt xmake: $XM_PREBUILT"
+elif [ "$STAGE" = build ]; then
   XM_PREBUILT=${XM_PREBUILT:-$DEPS/xmake-built.tgz}
   [ -s "$XM_PREBUILT" ] || { echo "XM_PREBUILT_MISSING $XM_PREBUILT"; exit 1; }
   export XM_PREBUILT

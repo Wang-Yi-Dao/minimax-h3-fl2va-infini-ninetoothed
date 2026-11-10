@@ -5,7 +5,15 @@
 set -uo pipefail
 STEPS=${1:-50}; BUDGET=${2:-1500}
 H=${IFAB_AFS_HOME:-$HOME}
-CH=${CHAIN_DIR:-$(ls -d $H/minimax_h3/chain/*/ 2>/dev/null | tail -1)}
+if [ -n "${CHAIN_DIR:-}" ]; then
+  CH=$CHAIN_DIR
+else
+  # 取链上最新的、且确实含 libs 的那一个（时间戳目录名按字典序即时间序）
+  CH=""
+  for d in $(ls -d $H/minimax_h3/chain/*/ 2>/dev/null | sort -r); do
+    if [ -d "${d}libs" ]; then CH=${d%/}; break; fi
+  done
+fi
 CH=${CH%/}
 echo "RUN_START $(date -u +%FT%T) steps=$STEPS budget=$BUDGET chain=$CH"
 [ -d "$CH/libs" ] || { echo "CHAIN_LIBS_MISSING $CH/libs"; exit 1; }
