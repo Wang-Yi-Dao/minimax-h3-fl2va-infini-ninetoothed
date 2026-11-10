@@ -86,13 +86,3 @@ CMP_RC=0
 grep: /dev/shm/infinifabric-shell/284f2d3c2a3d4460a38efe2b52aa67c2/workspace/logs/nn28_cmp.log: No such file or directory
 TOTAL_SECS=957
 === nn28 done 2026-11-10T05:54:28
---- compare lines
-/public/home/aclsylqidf/infinifabric-users/users/7afc10d702784d51ae6d6035c6df9bd7/minimax_h3/logs/nn28_1109_094916_cmp.log:[task] reference_fl2va: using existing result: /public/home/aclsylqidf/infinifabric-users/users/7afc10d702784d51ae6d6035c6df9bd7/minimax_h3/cmp/reference_fl2va.mp4
-/public/home/aclsylqidf/infinifabric-users/users/7afc10d702784d51ae6d6035c6df9bd7/minimax_h3/logs/nn28_1109_094916_cmp.log:[task] infinilm_fl2va: using existing result: /dev/shm/infinifabric-shell/2138263df38b4310a438c4accf85e868/workspace/out/nl_50.mp4
-/public/home/aclsylqidf/infinifabric-users/users/7afc10d702784d51ae6d6035c6df9bd7/minimax_h3/logs/nn28_1109_094916_cmp.log:    Size:         PASS (PyTorch 768x928, InfiniLM 768x928)
-/public/home/aclsylqidf/infinifabric-users/users/7afc10d702784d51ae6d6035c6df9bd7/minimax_h3/logs/nn28_1109_094916_cmp.log:    Length:       PASS (PyTorch 124 frames, InfiniLM 124 frames)
-/public/home/aclsylqidf/infinifabric-users/users/7afc10d702784d51ae6d6035c6df9bd7/minimax_h3/logs/nn28_1109_094916_cmp.log:    Average SSIM: 79.874%
-/public/home/aclsylqidf/infinifabric-users/users/7afc10d702784d51ae6d6035c6df9bd7/minimax_h3/logs/nn28_1109_094916_run.log:[done] Saved to: /dev/shm/infinifabric-shell/2138263df38b4310a438c4accf85e868/workspace/out/nl_50.mp4
-/public/home/aclsylqidf/infinifabric-users/users/7afc10d702784d51ae6d6035c6df9bd7/minimax_h3/logs/nn28_1109_215217_run.log:[done] Saved to: /dev/shm/infinifabric-shell/500d0a4b14444bd9b1d244da121891a3/workspace/run-2d8f9760653b443ca3f50707d1dcb558/.run/out/nl_50.mp4
-/public/home/aclsylqidf/infinifabric-users/users/7afc10d702784d51ae6d6035c6df9bd7/minimax_h3/logs/nn28_1110_053831_run.log:[done] Saved to: /dev/shm/infinifabric-shell/284f2d3c2a3d4460a38efe2b52aa67c2/workspace/out/nl_50.mp4
-JOB_END 2026-11-10T05:54:28

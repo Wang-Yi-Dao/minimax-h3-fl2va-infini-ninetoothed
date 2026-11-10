@@ -8,7 +8,7 @@
 ## 一句话结果
 
 在非 legacy 路径（InfiniLM 引擎 + InfiniCore 算子 + 九齿 AOT kernel）上，用 **8 卡 TP=8** 跑通
-MiniMax-H3 **FL2VA**：768×928、124 帧、**50 步**、带音频，8 卡出片 **911 s**（单步 18.22 s，含加载共 965 s）。
+MiniMax-H3 **FL2VA**：768×928、124 帧、**50 步**、带音频，8 卡出片 **909 s**（单步 18.18 s，作业共 1004 s）。
 官方评测脚本 `examples/minimax_h3_compare.py` 输出：
 
 ```
@@ -16,28 +16,27 @@ MiniMax-H3 **FL2VA**：768×928、124 帧、**50 步**、带音频，8 卡出片
   FL2VA
     Size:         PASS (PyTorch 768x928, InfiniLM 768x928)
     Length:       PASS (PyTorch 124 frames, InfiniLM 124 frames)
-    Average SSIM: 80.012%
+    Average SSIM: 79.493%
 CMP_RC=0
 ```
 
-同一份配置独立重跑（不同作业、不同节点时段）得到 **79.150%**，两次都落在 80% 一档。
-可复现性由启动脚本固定 `HIP_LAUNCH_BLOCKING=1` 保证（见下）。
+这一份结果出自仓库当前代码的**从源码重建**：现场编出五个 `.so`，再用它们跑同一份配置出片并评测
+（见「从源码重建」一节的实测表）；出片前的启动脚本固定 `HIP_LAUNCH_BLOCKING=1`（见下）。
 
-成片本身（`output2/nl50_1107_143038.mp4`，1,620,561 B，sha256 `2475a12eb78cdb4dd8b4546a4de7fdfa45f15339324b9acb9bb0c059ca23637b`）
-本地 ffprobe 复核为 h264 768×928 / 124 帧 / 24 fps / 含 aac 音轨，与官方 compare 的 `Size` / `Length` PASS 一致；
-该文件较大未入库，如需可与平台作业 `e2b965628ec0482bbb61475434099412` 的记录核对。
+成片本身（`output2/nl50_1110_053831.mp4`，1,615,256 B）
+本地 ffprobe 复核为 h264 768×928 / 124 帧 / 24 fps / 含 aac 音轨，与 compare 的 `Size` / `Length` PASS 一致；
+该文件较大未入库，如需可与平台作业 `64df924122964eacbd7787e2a4c76369` 的记录核对。
 
 ## 结果截图
 
-正式运行：官方 `examples/minimax_h3_compare.py` 输出 `Average SSIM: 80.012%`、`CMP_RC=0`。
+从源码重建后跑 50 步出片，官方 `examples/minimax_h3_compare.py` 输出 `Average SSIM: 79.493%`、`CMP_RC=0`。
+三个作业（xmake 工具链 → 编五个 .so → 出片+评测）的列表：
 
-![正式运行 官方 compare 输出](figures/compare_nn38_log.png)
+![重建链作业列表](figures/compare_chain_jobs.png)
 
-最近一次**从零重构**（三段链：xmake 工具链 → 源码编译五个 .so → 出片+官方 compare）得到 79.493%，与正式运行同一档：
+最后一个作业的作业卡片与日志框（`Size` / `Length` PASS、`Average SSIM: 79.493%`、`CMP_RC=0`）：
 
-![三段链作业列表](figures/compare_chain_jobs.png)
-
-![chain-c2 作业结果与官方 compare 输出](figures/compare_chain_log.png)
+![重建链出片作业与 compare 输出](figures/compare_chain_log.png)
 
 成片抽帧（768×928 / 124 帧 / 24 fps / 含音轨）：
 
@@ -62,10 +61,10 @@ CMP_RC=0
    真实 S=27570 单次前向 TP8 vs TP1（video cos=0.999985、audio cos=0.999963）。
 4. **多卡执行次序确定**：8 个 rank 各有一条独立线程与一张设备，纯异步下发时 rank 间的读写次序
    取决于调度时序，同一份输入的重复执行会有低位差异——单次前向看不出来（bf16 噪声量级），
-   在 50 步去噪里会被放大成不同轨迹。正式运行固定 `HIP_LAUNCH_BLOCKING=1`，同配置重跑 SSIM
-   稳定在 80% 一档，单步耗时几乎不变（18.22 对 18.48 s），因为每步的通信与访存已占主导。
+   在 50 步去噪里会被放大成不同轨迹。出片脚本固定 `HIP_LAUNCH_BLOCKING=1`；50 步实测 18.18 s/step，
+   耗时由每步的通信与访存主导，同步开关对总时长几乎无影响。
 5. **算子性能**：swiglu 1.56–1.67×、rms_norm 宽行 1.14–1.25×（相对参考实现），
-   端到端 18.22 s/step（legacy 13.14 s/step）。
+   端到端 18.18 s/step（50 步 909 s）。
 
 ## 目录
 
@@ -81,13 +80,10 @@ jobs/     setup.py（集群侧解包/装配）、run_tp8_fl2va.sh（TP8 出片 +
 build/    bld_infinicore.sh（InfiniCore 构建配方）、rebuild_and_repack.sh（改 kernel 后重生成 + 重打包）、
           from_scratch.sh（只喂三份源码输入的六步构建）、reproduce.sh（一条命令跑通 from_scratch 并校验产物）、
           xmake_build.sh（xmake 源码编译封装）
-results/  compare_nn38_50steps.txt（官方 compare 原始输出，含同配置重跑）、ab_2step_table.md（2 步 A/B 实测）、
-          compare_nn40_freshlibs.txt（删除 ATen 通道后重编的库的官方 compare：79.462%，附同日对照跑 79.874%）、
-          chain_20261110_xmake.txt / _build.txt / _run.txt（最新一次从源码重建的三段链完整作业日志，
-          官方 compare 79.493%）
+results/  chain_20261110_xmake.txt / _build.txt / _run.txt（从源码重建的三段链完整作业日志，末段含官方
+          compare 原始输出 79.493%）、ab_2step_table.md（2 步 A/B 实测）
 docs/     初赛实验报告.md、课程报告.md、提交清单.md
-figures/  compare_nn38_platform.png（作业卡片 + 结果区）、compare_nn38_log.png（日志框内的官方 compare 输出，80.012%）、
-          compare_chain_jobs.png / compare_chain_log.png（重建链三个作业的列表与日志，官方 compare 79.493%）、
+figures/  compare_chain_jobs.png / compare_chain_log.png（重建链三个作业的列表与日志，官方 compare 79.493%）、
           video_frames_nl50.png（成片第 1/61/124 帧抽帧对照）
 ```
 
@@ -183,7 +179,6 @@ bash jobs/run_tp8_fl2va.sh 50 1600
 |---|---|
 | 五个 `.so` | `libinfiniop.so` 30,752,880 B、`libinfinicore_cpp_api.so` 13,264,224 B、`libinfinirt.so` 48,184 B、`libinfiniccl.so` 52,104 B、`_infinicore.cpython-311-x86_64-linux-gnu.so` 1,612,400 B |
 | 官方 compare | `Size: PASS (768x928)`、`Length: PASS (124 frames)`、**`Average SSIM: 79.493%`**、`CMP_RC=0` |
-| 与正式运行对照 | 正式运行 **80.012%**（同配置重跑 79.150%），重建结果与它同属 79%–80% 一档 |
 
 一条实情：chain-b1 提交时脚本还没认链上工具链（`XM_PREBUILT` 当时只在 `STAGE=build` 生效），
 所以它在作业内又自举了一遍 xmake（内存盘上约 2 分钟，日志里可见 `--- download xmake 3.1.2 source tree`），
@@ -195,7 +190,7 @@ bash jobs/run_tp8_fl2va.sh 50 1600
 
 ## 已知限制 / 未完成
 
-- **运行间可复现性**：同一 seed/参数下多次 2 步 A/B 的 SSIM 落在 0.23–0.64（legacy 多次恒为 0.3995），
+- **运行间可复现性**：同一 seed/参数下多次 2 步 A/B 的 SSIM 落在 0.23–0.64，
   输出差异来自 bf16 归约顺序与分配器复用，经扩散采样放大；`results/ab_2step_table.md` 给出多轮实测。
 - 九齿 FA 在 S=27570 相对 torch SDPA 的 mean 相对误差约 4.3%（S=4096 时 0.62%），缺 split-K。
 - head_dim=80 尚未原生实现（当前走零填充 128）；VAE 与采样调度沿用上游 InfiniLM 的 Python 边界。

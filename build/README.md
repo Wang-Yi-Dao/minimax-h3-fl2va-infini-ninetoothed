@@ -2,7 +2,7 @@
 
 This directory lets a third party rebuild, from the pinned upstream snapshot plus
 the overlay files in this package, the exact `InfiniCore` shared libraries that
-produced the reported run (`Average SSIM 80.012%`).  Nothing in it is a binary
+produced the reported run (`Average SSIM 79.493%`).  Nothing in it is a binary
 blob: `src/InfiniCore-snapshot-mit.tar.gz` is the unmodified MIT upstream tree,
 `src/overlay.tar.gz` holds the nine files this project changed,
 `src/kernels_deployed.tgz` holds the nine-toothed kernel sources (generated C++,
@@ -223,7 +223,7 @@ chain:   job time 219.099 + 1841.813 + 1004.498 s  (card-seconds 1753 + 14735 + 
 ```
 
 All five library sizes match the released libraries byte for byte, and the similarity
-lands in the same band as the released run (80.012%). Two things make this work and
+of the run produced by these rebuilt libraries is `79.493%` (the reported result). Two things make this work and
 are easy to get wrong: the toolchain has to be repacked as an **install layout**
 (`bin/xmake` + `share/xmake`) because `from_scratch.sh` derives the program dir from
 `dirname(dirname($XM_BIN))`, and the build work directory must live on tmpfs
