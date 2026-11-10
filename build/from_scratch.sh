@@ -40,24 +40,18 @@ do_prep=1; [ "$PHASE" = "build" ] && do_prep=0
 if [ "$do_prep" = 1 ]; then
 stage "prep (work=$W)"
 mkdir -p "$W"/py "$W"/ic "$W"/xm "$W"/tmp "$W"/tcache "$W"/logs
+WHL_PID=
 if [ -z "$WHEELS" ]; then
   # No wheel directory given: fetch the four wheels (ninetoothed, sympy, mpmath,
   # numpy, plus the Hygon triton build) from PyPI's JSON API.  pip in this image
   # cannot do it -- see build/README.md and fetch_wheels.py.
+  # This is a few hundred MB of downloads, so run it in the background and let the
+  # snapshot extraction and the xmake compile below overlap with it; the unpack
+  # happens in step 2, once both sides are done.
   WHEELS="$W/whl"
-  "$PY" "$(dirname "$0")/fetch_wheels.py" "$WHEELS" || { echo "FETCH_WHEELS_FAILED"; exit 1; }
-fi
-if [ -n "$WHEELS" ]; then
-  "$PY" - "$W/py" "$WHEELS" <<'PYEOF'
-import sys, zipfile, pathlib, glob, os
-dst = pathlib.Path(sys.argv[1]); dst.mkdir(parents=True, exist_ok=True)
-n = 0
-for w in sorted(glob.glob(os.path.join(sys.argv[2], '*.whl'))):
-    with zipfile.ZipFile(w) as z:
-        z.extractall(dst)
-    n += 1
-print('unpacked wheels:', n)
-PYEOF
+  "$PY" "$(dirname "$0")/fetch_wheels.py" "$WHEELS" > "$W/logs/wheels.log" 2>&1 &
+  WHL_PID=$!
+  echo "wheels: fetching into $WHEELS in the background (pid $WHL_PID)"
 fi
 # The upstream snapshot is ~7.5k files, which costs ~19 min on AFS.  Set
 # CRB_RESUME=1 to reuse a tree extracted by an earlier run; the overlay (9
@@ -158,6 +152,25 @@ if 'THRUST_SHIM_DIR' not in s:
     io.open(lua, 'w', encoding='utf-8').write(s)
 print('shim ok', os.path.isfile(os.path.join(shim, 'version.h')), 'THRUST_SHIM_DIR' in io.open(lua, encoding='utf-8').read())
 PYEOF
+
+# Wheels (started above, right after prep began) must be on disk before the AOT
+# side is patched and imported.
+if [ -n "$WHL_PID" ]; then
+  wait "$WHL_PID" || { echo "FETCH_WHEELS_FAILED"; tail -5 "$W/logs/wheels.log" 2>/dev/null | cut -c1-160; exit 1; }
+  echo "wheels: $(ls "$WHEELS"/*.whl 2>/dev/null | wc -l) files downloaded"
+fi
+if [ -n "$WHEELS" ]; then
+  "$PY" - "$W/py" "$WHEELS" <<'PYEOF'
+import sys, zipfile, pathlib, glob, os
+dst = pathlib.Path(sys.argv[1]); dst.mkdir(parents=True, exist_ok=True)
+n = 0
+for w in sorted(glob.glob(os.path.join(sys.argv[2], '*.whl'))):
+    with zipfile.ZipFile(w) as z:
+        z.extractall(dst)
+    n += 1
+print('unpacked wheels:', n)
+PYEOF
+fi
 
 stage "step 2/6 python AOT patches (patch_py.py: driverless target, hip .cpp sources, EXDEV cache)"
 # The offline-properties edit is only correct when no device is visible; with the

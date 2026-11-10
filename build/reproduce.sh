@@ -3,19 +3,23 @@
 #
 #   git clone https://github.com/Wang-Yi-Dao/minimax-h3-fl2va-infini-ninetoothed.git
 #   cd minimax-h3-fl2va-infini-ninetoothed
-#   bash build/reproduce.sh                 # 工作目录默认 ./build-work
+#   bash build/reproduce.sh                 # 工作目录默认本地盘 /tmp/repro-build
+#   bash build/reproduce.sh /data/bw        # 或显式指定
 #
 # 需要：python3.11、DTK（/opt/dtk，带 hipcc 与 clang）、能访问 GitHub 与 PyPI。
 # 三份源码输入随包在 src/ 下，脚本先按 src/SHA256SUMS 校验再构建；
 # 构建依赖（xmake 3.1.2 源码树、pybind11 3.1.0 头文件）由脚本自己下载，
 # 下载失败可用 GH_MIRROR 换镜像，或预置 XM_TGZ / PYBIND11_ROOT。
+# 工作目录默认落在本地盘：上游快照 7.5k 个小文件解在 AFS 上要 19 分钟，
+# 本地盘几十秒；构建结束后把 5 个 .so 拷到想要的位置即可。
 # 产物：<work>/ic/build/linux/x86_64/release 下五个 .so。
 # 端到端出片 + 官方评分见 build/README.md（jobs/run_tp8_fl2va.sh，另需模型权重与参考视频）。
 set -uo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/.." && pwd)
-W=${1:-$PWD/build-work}
+LOCAL=${LOCAL_SCRATCH:-/dev/shm/repro-build}
+W=${1:-$LOCAL}
 PY=${PY:-python3.11}
 DTK=${DTK:-/opt/dtk}
 J=${J:-32}
