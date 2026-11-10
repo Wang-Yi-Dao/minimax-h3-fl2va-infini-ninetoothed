@@ -15,7 +15,10 @@ not object code), and the rest is the scripts that drive the build.
 | `from_scratch.sh` | the whole build, six named steps, environment driven |
 | `patch_py.py` | the nine edits that make the stock triton / ninetoothed wheels usable offline; prints `PATCH <name> OK\|SKIP\|MISS` for each |
 | `gen_dispatch.py` | emits `ic/build/ninetoothed/flash_attention.{c,h}`, the dispatcher that chains the two kernels behind one C entry point |
-| `rebuild_and_validate.sh` | the one-job wrapper used for the reproducibility check: verify shas, rebuild, then run 50 steps + official compare |
+| `rebuild_and_validate.sh` | an older one-job wrapper (verify shas, rebuild, run 50 steps, compare). **Superseded**: it assumes a single 3200 s slot and a prebuilt xmake tarball, which this cluster cannot satisfy — see the chain below |
+| `../jobs/repro_xmake_step.sh` | build xmake from source, resumable across jobs; packs `chain/<ts>/xmake-toolchain.tgz` in installed layout (`bin/xmake` + `share/xmake`) and prints `XMP_OK` |
+| `../jobs/repro_build.sh` | the reproducibility check, part 1: verify shas, rebuild the five libraries, publish them read-only under `chain/<ts>/libs` + `MANIFEST.txt` |
+| `../jobs/repro_run.sh` | the reproducibility check, part 2: consume those libraries, run 50 steps + official compare |
 | `../src/InfiniCore-snapshot-mit.tar.gz` | upstream InfiniCore snapshot (MIT, includes `LICENSE`) |
 | `../src/overlay.tar.gz` | the changed / added sources, rooted at `ic/` |
 | `../src/kernels_deployed.tgz` | the nine-toothed kernel sources the released library was compiled from (`ic/build/ninetoothed/`, 106 files, 2,457,374 B) |
@@ -195,10 +198,11 @@ every run, so a changed overlay always wins.
 
 ## Verification run (clean room, published inputs only)
 
-`rebuild_and_validate.sh` is what produced the published numbers below: it takes
-only the three artefacts above (verified against `../src/SHA256SUMS`), rebuilds the
-five libraries in a fresh local scratch tree, then runs the published 50-step
-FL2VA pipeline plus `examples/minimax_h3_compare.py` with those libraries.
+The published numbers below came from jobs that do exactly this: take only the
+three artefacts above (verified against `../src/SHA256SUMS`), rebuild the five
+libraries in a fresh work directory, then run the published 50-step FL2VA pipeline
+plus `examples/minimax_h3_compare.py` with those libraries. The packaged equivalent
+is `../jobs/repro_build.sh` followed by `../jobs/repro_run.sh`.
 
 ```
 check:   SHA_OK snapshot.tgz / SHA_OK overlay.tar.gz / SHA_OK kernels.tgz

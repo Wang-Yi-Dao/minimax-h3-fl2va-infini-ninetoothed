@@ -59,14 +59,19 @@ src/      pre_ctxid.c（设备键 shim）、kb7.py（源码级实现）、mha_ni
 jobs/     setup.py（集群侧解包/装配）、run_tp8_fl2va.sh（TP8 出片 + 官方 compare）、
           ab_native_vs_legacy.sh（同 seed 2 步 A/B）、
           fa_precision_probe.py（FA 相对 torch SDPA 的精度随 S 变化）、ssim_report.py（同口径 SSIM 汇总）、
-          submit_multi.mjs / submit_snap.mjs（平台批作业提交器）
-build/    bld_infinicore.sh（InfiniCore 构建配方）、rebuild_and_repack.sh（改 kernel 后重生成 + 重打包）
+          submit_multi.mjs / submit_snap.mjs（平台批作业提交器）、
+          repro_xmake_step.sh（从源码自举 xmake 工具链，可反复续跑）、
+          repro_build.sh（校验 sha256 → 从三份源码重建五个 .so）、repro_run.sh（50 步出片 + 官方 compare）
+build/    bld_infinicore.sh（InfiniCore 构建配方）、rebuild_and_repack.sh（改 kernel 后重生成 + 重打包）、
+          from_scratch.sh（只喂三份源码输入的六步构建）、reproduce.sh（一条命令跑通 from_scratch 并校验产物）、
+          xmake_build.sh（xmake 源码编译封装）
 results/  compare_nn38_50steps.txt（官方 compare 原始输出，含同配置重跑）、ab_2step_table.md（2 步 A/B 实测）、
           compare_nn40_freshlibs.txt（删除 ATen 通道后重编的库的官方 compare：79.462%，附同日对照跑 79.874%）、
           rebuild_check.txt（第三方从源码重建的实测记录：79.907%）、
           rebuild_check_20261110.txt（第二次干净重建的完整作业日志：79.402%，15.73 s/step）
-docs/     初赛实验报告.md、提交清单.md
+docs/     初赛实验报告.md、课程报告.md、提交清单.md
 figures/  compare_nn38_platform.png（作业卡片 + 结果区）、compare_nn38_log.png（日志框内的官方 compare 输出，80.012%）、
+          compare_crb_platform.png / compare_crb_log.png（重建作业 2d8f9760… 的作业详情与官方 compare 79.402%）、
           video_frames_nl50.png（成片第 1/61/124 帧抽帧对照）
 ```
 
@@ -116,7 +121,14 @@ PYTHONPATH="$W/pylibs:$HOME/pylibs_extra:$PYTHONPATH" python3 -u \
 | `src/kernels_deployed.tgz` | 出片所用库的九齿 kernel 源码 `ic/build/ninetoothed/`（106 文件） | 2,457,374 B / `fbf98247` |
 
 ```bash
-# 1) 取三个输入，按 build/README.md 设好 DTK / wheels / xmake / pybind11
+# 0) 工具链：需要 xmake ≥ 3.1.2。官方 bundle 链接 GLIBC_2.38，本镜像只有 2.35，所以 xmake
+#    必须从源码编；又因为计算节点没有可写本地盘、AFS 小文件极慢（实测 cp -a 4008 个文件
+#    要 732 s、make 约 16 个对象/分钟、单作业上限 3200 s），这一段单独成链：反复跑
+#    jobs/repro_xmake_step.sh 直到打印 XMP_OK，产出 chain/<ts>/xmake-toolchain.tgz
+#    （安装布局 bin/xmake + share/xmake，下游直接解包即用）。
+export XM_PREBUILT=<上一步产出的 xmake-toolchain.tgz>
+
+# 1) 取三个输入，按 build/README.md 设好 DTK / wheels / pybind11
 export IC_TGZ=$PWD/src/InfiniCore-snapshot-mit.tar.gz
 export OVL_TGZ=$PWD/src/overlay.tar.gz
 export CRB_KERNELS_TGZ=$PWD/src/kernels_deployed.tgz
@@ -128,7 +140,7 @@ export CRB_LIBS=<上一步的 build-work>/ic/build/linux/x86_64/release
 bash jobs/run_tp8_fl2va.sh 50 1600
 ```
 
-实测两次（8 卡，干净工作区，只喂上面三个输入，`build/rebuild_and_validate.sh` 一个作业跑完）。
+实测两次（8 卡，干净工作区，只喂上面三个输入，由 `jobs/repro_build.sh` 构建、`jobs/repro_run.sh` 出片并评测）。
 两次都是三份 sha256 全部 `SHA_OK`、构建 `BUILD_EXIT=0`、5 个 so 全部产出：
 
 | 运行 | libinfinicore_cpp_api.so | 50 步速度 | 出片 | 官方 compare | 全流程 |
