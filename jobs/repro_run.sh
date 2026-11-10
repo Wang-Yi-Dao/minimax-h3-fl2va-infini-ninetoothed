@@ -44,7 +44,8 @@ D=$(fetch_repo) || { echo REPO_FAIL; exit 1; }
 cd "$D" || exit 1
 echo "--- repo ok, CRB_LIBS=$CH/libs"
 CRB_LIBS="$CH/libs" STEPS=$STEPS BUDGET=$BUDGET bash jobs/run_tp8_fl2va.sh "$STEPS" "$BUDGET" 2>&1 | tail -80
-echo "--- compare lines (newest logs only)"
-NEW_LOGS=$(ls -t $H/minimax_h3/logs/*.log 2>/dev/null | head -3)
+echo "--- compare lines (logs written during this run only)"
+# 只取本次作业运行窗口内写过的日志（-2h），避免把上一次运行的旧 cmp 日志也 grep 进来
+NEW_LOGS=$(find $H/minimax_h3/logs -maxdepth 1 -name "*.log" -newermt "-2 hours" 2>/dev/null | head -5)
 [ -n "$NEW_LOGS" ] && grep -aE "Size:|Length:|Average SSIM|CMP_RC" $NEW_LOGS 2>/dev/null | tail -8
 echo "JOB_END $(date -u +%FT%T)"
