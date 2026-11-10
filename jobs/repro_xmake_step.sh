@@ -122,12 +122,39 @@ if [ -x "$BIN" ]; then
   rm -rf "$WD/inst"; mkdir -p "$WD/inst/bin" "$WD/inst/share"
   cp -f "$BIN" "$WD/inst/bin/xmake"; chmod +x "$WD/inst/bin/xmake"
   if [ -d "$XSRC/xmake" ]; then cp -a "$XSRC/xmake" "$WD/inst/share/xmake"; fi
-  ( cd "$WD/inst" && tar czf "$OUT.raw" . ) && mv -f "$OUT.raw" "$OUT"
-  echo "XMP_ARCHIVE $OUT bytes=$(stat -c%s "$OUT")"
-  sha256sum "$OUT" | tee "$CH/MANIFEST.txt"
+  # AFS 上让 tar 直接建 .tgz 会失败（gzip 子进程 open 报 Function not implemented，实测），
+  # 所以先在 tmpfs 里打包、再整文件复制到 AFS；若压缩仍失败，则退化为直接复制安装树目录。
+  TMPTGZ="$WD/xmake-toolchain.tgz"
+  OK=0
+  if ( cd "$WD/inst" && tar czf "$TMPTGZ" . ) && [ -s "$TMPTGZ" ]; then
+    CP_SECS0=$(date +%s)
+    if cp -f "$TMPTGZ" "$OUT" && [ -s "$OUT" ]; then
+      echo "XMP_ARCHIVE $OUT bytes=$(stat -c%s "$OUT") copy_secs=$(( $(date +%s) - CP_SECS0 ))"
+      OK=1
+    else
+      echo "XMP_ARCHIVE_COPY_FAIL $OUT"
+    fi
+  else
+    echo "XMP_ARCHIVE_TAR_FAIL tmpfs=$TMPTGZ"
+  fi
+  if [ "$OK" != 1 ]; then
+    # 退化路径：目录直传（bin/xmake + share/xmake 的 Lua 树，纯文本为主）
+    rm -rf "$CH/xmake-inst"
+    if cp -a "$WD/inst" "$CH/xmake-inst" && [ -x "$CH/xmake-inst/bin/xmake" ]; then
+      echo "XMP_DIR_OK $CH/xmake-inst"
+    else
+      echo "XMP_DIR_COPY_FAIL"
+    fi
+  fi
+  if [ "$OK" = 1 ]; then sha256sum "$OUT" | tee "$CH/MANIFEST.txt"; fi
+  { echo "build_rc=$MRC"; echo "make_secs=$(( $(el) ))"; echo "host=$(hostname)"; "$BIN" --version 2>&1 | head -2; } >> "$CH/MANIFEST.txt"
   chmod -R a+rwX "$CH" 2>/dev/null
-  echo "XMP_OK $(date -u +%FT%T) el=$(el)"
-  exit 0
+  if [ "$OK" = 1 ] || [ -x "$CH/xmake-inst/bin/xmake" ]; then
+    echo "XMP_OK $(date -u +%FT%T) el=$(el)"
+    exit 0
+  fi
+  echo "XMP_PACK_FAIL el=$(el)"
+  exit 5
 fi
 echo "XMP_PARTIAL el=$(el) objs=$(find "$XSRC" -name '*.o' | wc -l) -- rerun this script to continue"
 tail -6 "$CH/make.log" 2>/dev/null | cut -c1-160
