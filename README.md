@@ -90,7 +90,7 @@ figures/  compare_chain_jobs.png / compare_chain_log.png（重建链三个作业
 ## 复现
 
 前提：海光 DCU 集群（gfx936）、DTK 26.04、Python 3.11、PyTorch 2.9.0+das.opt1.dtk2604，
-已按 `build/bld_infinicore.sh` 构建 InfiniCore、按 `build/rebuild_and_repack.sh` 重打包，
+InfiniCore 五个 `.so` 按下一节「两条路」任一条取得（A 从源码编译 / B 取预编译产物），
 模型权重（MiniMax-H3 diffusers 目录）另行获取（不入库）。
 
 ```bash
@@ -121,12 +121,20 @@ PYTHONPATH="$W/pylibs:$HOME/pylibs_extra:$PYTHONPATH" python3 -u \
 
 批作业平台上的等价封装见 `jobs/run_tp8_fl2va.sh`（含 fail-fast 看门狗与日志归档）。
 
-## 从源码重建（第三方验证）
+## 两条路：从源码编译 / 直接用预编译产物
 
-本仓库不只给结果，也给出**能重建那一份 InfiniCore 的完整输入**：`build/` 与 `src/` 下三个 tar 包，
-全部是源码（无二进制产物），sha256 见 `src/SHA256SUMS`。
+两条路的终点完全一样：五个 `.so` 落到同一个目录，再用同一套命令跑 50 步出片与官方 compare。
+按环境选一条——A 完全从源码起（本仓库实测过的那条链），B 直接取我们编好的二进制（省掉约半小时编译）。
 
-最快的入口是一条命令（`build/reproduce.sh` 把三份输入校验、xmake 工具链、InfiniCore 五个 .so 串起来）：
+| 路线 | 做什么 | 实测耗时 | 产物来源 |
+|---|---|---|---|
+| **A 从源码编译** | `bash build/reproduce.sh $HOME/tmp/repro-build all` | 工具链 219.099 s + 编译 1713 s + 出片 1004.498 s（三段链） | 本仓库 `src/` 三份源码输入 |
+| **B 用预编译产物** | 从 Release `v1.2-prebuilt` 下五个 `.so` 放进工作目录 | 下载约 45 MB | 同一条链产出的二进制 |
+
+### 路线 A：从源码编译（本仓库实测）
+
+三份输入全部是源码（无二进制产物），sha256 见 `src/SHA256SUMS`，`build/reproduce.sh` 把校验、xmake 工具链、
+InfiniCore 五个 `.so` 串成一条命令：
 
 ```bash
 bash build/reproduce.sh $HOME/tmp/repro-build all   # 有可写本地盘可换 /dev/shm/repro-build（更快）
@@ -134,18 +142,19 @@ bash build/reproduce.sh $HOME/tmp/repro-build all   # 有可写本地盘可换 /
 # 不传工作目录时脚本按 $LOCAL_SCRATCH → /tmp → $HOME/tmp 自动探活
 ```
 
-三份输入（全部是源码，无二进制产物）：
-
 | 输入 | 内容 | 大小 / sha256 前缀 |
 |---|---|---|
 | `src/InfiniCore-snapshot-mit.tar.gz` | 上游 InfiniCore 快照（MIT，含 LICENSE） | 3,759,864 B / `620d40e2` |
 | `src/overlay.tar.gz` | 我们改动的 9 个源文件，根为 `ic/` | 19,254 B / `f1f28f73` |
 | `src/kernels_deployed.tgz` | 出片所用库的九齿 kernel 源码 `ic/build/ninetoothed/`（106 文件） | 2,457,374 B / `fbf98247` |
 
+集群不能直连 GitHub / PyPI 时，`reproduce.sh` 用 `GH_MIRROR` 换镜像（缺省 `https://ghproxy.net/`），
+也可预置 `XM_TGZ`、`PYBIND11_ROOT` 免下载。
+
 手工分段（也就是三段链，为什么这么拆见本节末尾的实测表）：
 
 ```bash
-# 0) 工具链：需要 xmake ≥ 3.1.2。官方 bundle 链接 GLIBC_2.38，本镜像只有 2.35，所以 xmake
+# 0) 工具链：需要 xmake >= 3.1.2。官方 bundle 链接 GLIBC_2.38，本镜像只有 2.35，所以 xmake
 #    必须从源码编；又因为计算节点没有可写本地盘、AFS 小文件极慢（实测 cp -a 4008 个文件
 #    要 732 s、make 约 16 个对象/分钟、单作业上限 3200 s），这一段单独成链：反复跑
 #    jobs/repro_xmake_step.sh 直到打印 XMP_OK，产出 chain/<ts>/xmake-toolchain.tgz
@@ -157,27 +166,56 @@ export IC_TGZ=$PWD/src/InfiniCore-snapshot-mit.tar.gz
 export OVL_TGZ=$PWD/src/overlay.tar.gz
 export CRB_KERNELS_TGZ=$PWD/src/kernels_deployed.tgz
 export DTK=/opt/dtk J=32 ARCH=gfx936 PHASE=all
-bash build/from_scratch.sh        # 6 步：shim → py 补丁 → kernel → dispatcher → 生成的源码修正 → xmake
-
-# 2) 用重建出的 5 个 so 覆盖运行时，再跑 50 步 + 官方 compare
-export CRB_LIBS=<上一步的 build-work>/ic/build/linux/x86_64/release
-bash jobs/run_tp8_fl2va.sh 50 1600
+bash build/from_scratch.sh        # 6 步：shim -> py 补丁 -> kernel -> dispatcher -> 生成的源码修正 -> xmake
 ```
 
-实测（8 卡，干净工作区，只喂上面三个输入）。三个作业构成一条链，**没有任何预置二进制包**：
-工具链由 xmake 源码编出，下游作业只读继承上游产物。
+### 路线 B：直接用预编译产物
+
+Release：<https://github.com/Wang-Yi-Dao/minimax-h3-fl2va-infini-ninetoothed/releases/tag/v1.2-prebuilt>
+（五个文件就是路线 A 那条链编出来的同一批二进制，AFS 上 `chain/20261110_050314/libs`）。
+
+```bash
+R=https://github.com/Wang-Yi-Dao/minimax-h3-fl2va-infini-ninetoothed/releases/download/v1.2-prebuilt
+D=$HOME/tmp/repro-build/ic/build/linux/x86_64/release
+mkdir -p "$D"
+for f in _infinicore.cpython-311-x86_64-linux-gnu.so libinfiniop.so \
+         libinfinicore_cpp_api.so libinfinirt.so libinfiniccl.so; do
+  curl -fL --retry 3 -o "$D/$f" "$R/$f"     # 直连不通时前面加 https://ghproxy.net/
+done
+sha256sum "$D"/*.so                          # 对照下表，五个都要对上
+```
+
+| 文件 | 大小 | sha256 |
+|---|---|---|
+| `libinfiniop.so` | 30,752,880 B | `a3847eeaba99fd23d7e2dce894a0002a9e2835cd8d82340bb46f6ebeb78b46fc` |
+| `libinfinicore_cpp_api.so` | 13,264,224 B | `b39722882f7846b0ffd4016414803ad79a72ad30604f3d6176b9ba168c37dcb9` |
+| `_infinicore.cpython-311-x86_64-linux-gnu.so` | 1,612,400 B | `41d649f73e209c42ee4949761eb63ca75eeff918d49ce89c5aba594f95f3dc04` |
+| `libinfiniccl.so` | 52,104 B | `81183241721bbacca06afa8a269ec3c2bbe80a09f74527a6690d53d4a35d2bf3` |
+| `libinfinirt.so` | 48,184 B | `1993bdeba63c137758fc2cb9d8ae772d6fdeb94999de260373ab52e1f4c7a467` |
+
+### 两条路之后（相同）
+
+```bash
+# 2) 用这 5 个 `.so` 覆盖运行时，再跑 50 步 + 官方 compare
+export CRB_LIBS=$HOME/tmp/repro-build/ic/build/linux/x86_64/release
+bash jobs/run_tp8_fl2va.sh 50 2300
+```
+
+### 路线 A 的实测（8 卡，干净工作区，只喂三份源码输入）
+
+三个作业构成一条链，**没有任何预置二进制包**：工具链由 xmake 源码编出，下游作业只读继承上游产物。
 
 | 作业 | 做什么 | 实测 | 产物 |
 |---|---|---|---|
-| `jobs/repro_xmake_step.sh` | 从 xmake 3.1.2 源码编工具链（内存盘里编，AFS 上只放成品） | `XMP_OK`，作业 219.099 s / 1753 卡秒 | `chain/20261110_045748/xmake-toolchain.tgz` 1,666,845 B（sha256 `b201aeb7…`） |
-| `jobs/repro_build.sh` | 校验三份 sha256 → 解快照/overlay → 打补丁 → 编五个 .so | `REPRO_OK secs=1713`，作业 1841.813 s / 14735 卡秒 | `chain/20261110_050314/libs` |
+| `jobs/repro_xmake_step.sh` | 从 xmake 3.1.2 源码编工具链（内存盘里编，AFS 上只放成品） | `XMP_OK`，作业 219.099 s / 1753 卡秒 | `chain/20261110_045748/xmake-toolchain.tgz` 1,666,845 B（sha256 `b201aeb7...`） |
+| `jobs/repro_build.sh` | 校验三份 sha256 -> 解快照/overlay -> 打补丁 -> 编五个 `.so` | `REPRO_OK secs=1713`，作业 1841.813 s / 14735 卡秒 | `chain/20261110_050314/libs` |
 | `jobs/repro_run.sh` | 只读 chain 里的 .so，跑 50 步 FL2VA + 官方 compare | `RUN_RC=0 failed=0`，18.18 s/step（909 s），作业 1004.498 s / 8036 卡秒 | `nl_50.mp4` + compare 结果 |
 
 产物与结果：
 
 | 项目 | 实测值 |
 |---|---|
-| 五个 `.so` | `libinfiniop.so` 30,752,880 B、`libinfinicore_cpp_api.so` 13,264,224 B、`libinfinirt.so` 48,184 B、`libinfiniccl.so` 52,104 B、`_infinicore.cpython-311-x86_64-linux-gnu.so` 1,612,400 B |
+| 五个 `.so` | 就是路线 B 表里那五行（尺寸与 sha256 一致） |
 | 官方 compare | `Size: PASS (768x928)`、`Length: PASS (124 frames)`、**`Average SSIM: 79.493%`**、`CMP_RC=0` |
 
 一条实情：chain-b1 提交时脚本还没认链上工具链（`XM_PREBUILT` 当时只在 `STAGE=build` 生效），
