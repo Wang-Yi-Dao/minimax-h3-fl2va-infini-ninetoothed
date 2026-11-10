@@ -1,6 +1,6 @@
 # MiniMax-H3 FL2VA 在 InfiniLM / InfiniCore + 九齿（NineToothed）上的适配与优化
 
-嵩山杯（2026 秋季高级人工智能）初赛作品代码仓库，团队账户 **xdzs2026_b0359**。
+嵩山杯（2026 秋季高级人工智能）初赛作品代码仓库，队伍 **zzucs123**。
 
 本仓库只包含**我们自己写的代码、补丁、作业脚本与实测结果**；上游 InfiniLM / InfiniCore / nine-toothed
 以补丁形式给出，不复制其完整源码（体积与许可原因，见 `THIRD_PARTY_NOTICES.md`）。
@@ -26,6 +26,23 @@ CMP_RC=0
 成片本身（`output2/nl50_1107_143038.mp4`，1,620,561 B，sha256 `2475a12eb78cdb4dd8b4546a4de7fdfa45f15339324b9acb9bb0c059ca23637b`）
 本地 ffprobe 复核为 h264 768×928 / 124 帧 / 24 fps / 含 aac 音轨，与官方 compare 的 `Size` / `Length` PASS 一致；
 该文件较大未入库，如需可与平台作业 `e2b965628ec0482bbb61475434099412` 的记录核对。
+
+
+## 结果截图
+
+正式运行：官方 `examples/minimax_h3_compare.py` 输出 `Average SSIM: 80.012%`、`CMP_RC=0`。
+
+![正式运行 官方 compare 输出](figures/compare_nn38_log.png)
+
+最近一次**从零重构**（三段链：xmake 工具链 → 源码编译五个 .so → 出片+官方 compare）得到 79.493%，与正式运行同一档：
+
+![三段链作业列表](figures/compare_chain_jobs.png)
+
+![chain-c2 作业结果与官方 compare 输出](figures/compare_chain_log.png)
+
+成片抽帧（768×928 / 124 帧 / 24 fps / 含音轨）：
+
+![成片抽帧](figures/video_frames_nl50.png)
 
 ## 核心贡献
 
