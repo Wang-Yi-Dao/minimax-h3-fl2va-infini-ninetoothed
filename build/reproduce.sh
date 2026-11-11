@@ -98,17 +98,67 @@ fi
 PB=${PYBIND11_ROOT:-$DEPS/pybind11-3.1.0}
 if [ ! -f "$PB/include/pybind11/pybind11.h" ]; then
   echo "--- download pybind11 3.1.0 source"
-  PYBIND11_ROOT="$PB" "$PY" - <<'PYEOF' || { echo "PYBIND11_DL_FAIL"; exit 1; }
+  # 集群出口对 pypi.org 常常不通，按 pypi 源(直连/清华/阿里/GitHub 镜像 tarball) 依次尝试
+  PYBIND11_ROOT="$PB" GH_MIRROR="$MIR" "$PY" - <<'PYEOF' || { echo "PYBIND11_DL_FAIL"; exit 1; }
 import io, json, os, sys, tarfile, urllib.request
+
 dst = os.environ["PYBIND11_ROOT"]
-meta = json.load(urllib.request.urlopen("https://pypi.org/pypi/pybind11/3.1.0/json", timeout=120))
-url = next(f["url"] for f in meta["urls"] if f["filename"].endswith(".tar.gz"))
-print("PYBIND11_SDIST", url)
-raw = urllib.request.urlopen(url, timeout=300).read()
-os.makedirs(os.path.dirname(os.path.abspath(dst)), exist_ok=True)
+mir = os.environ.get("GH_MIRROR", "https://ghproxy.net/")
+tag = "v3.1.0"
+apis = [
+    "https://pypi.org/pypi/pybind11/3.1.0/json",
+    "https://pypi.tuna.tsinghua.edu.cn/pypi/pybind11/3.1.0/json",
+    "https://mirrors.aliyun.com/pypi/pybind11/3.1.0/json",
+]
+tgzs = [
+    "https://github.com/pybind/pybind11/archive/refs/tags/%s.tar.gz" % tag,
+    mir + "https://github.com/pybind/pybind11/archive/refs/tags/%s.tar.gz" % tag,
+]
+parent = os.path.dirname(os.path.abspath(dst))
+os.makedirs(parent, exist_ok=True)
+
+def fetch(u, timeout):
+    with urllib.request.urlopen(u, timeout=timeout) as r:
+        return r.read()
+
+raw = None
+for api in apis:
+    try:
+        meta = json.load(io.BytesIO(fetch(api, 60)))
+        url = next(f["url"] for f in meta["urls"] if f["filename"].endswith(".tar.gz"))
+        print("PYBIND11_SDIST", api, url)
+        raw = fetch(url, 300)
+        break
+    except Exception as exc:
+        print("PYBIND11_API_FAIL", api, repr(exc)[:120])
+if raw is None:
+    for u in tgzs:
+        try:
+            print("PYBIND11_TGZ", u)
+            raw = fetch(u, 300)
+            if len(raw) < 100000:
+                raise RuntimeError("short body %d" % len(raw))
+            break
+        except Exception as exc:
+            print("PYBIND11_TGZ_FAIL", u, repr(exc)[:120])
+            raw = None
+if raw is None:
+    sys.exit(1)
 with tarfile.open(fileobj=io.BytesIO(raw)) as t:
-    t.extractall(os.path.dirname(os.path.abspath(dst)) or ".", filter="data")
-print("PYBIND11_ROOT", dst, "hdr", os.path.isfile(os.path.join(dst, "include", "pybind11", "pybind11.h")))
+    t.extractall(parent, filter="data")
+hdr = os.path.join(dst, "include", "pybind11", "pybind11.h")
+if not os.path.isfile(hdr):
+    # GitHub tarball 的顶层目录名是 pybind11-3.1.0（无 v 前缀），必要时改名对齐
+    for name in sorted(os.listdir(parent)):
+        cand = os.path.join(parent, name)
+        if os.path.isdir(cand) and os.path.isfile(os.path.join(cand, "include", "pybind11", "pybind11.h")):
+            if cand != dst:
+                try: os.replace(cand, dst)
+                except OSError: pass
+            break
+hdr = os.path.join(dst, "include", "pybind11", "pybind11.h")
+print("PYBIND11_ROOT", dst, "hdr", os.path.isfile(hdr))
+sys.exit(0 if os.path.isfile(hdr) else 1)
 PYEOF
 fi
 echo "XMAKE_TGZ=$(stat -c%s "$XM_TGZ" 2>/dev/null) PYBIND11_ROOT=$PB"
