@@ -232,26 +232,6 @@ the same build that needs more than 30 minutes on AFS finishes in under 29 minut
 including the wheel download on tmpfs. Logs: `../results/chain_20261110_xmake.txt`,
 `..._build.txt`, `..._run.txt`.
 
-## Re-verified 2026-11-11: a single job does not fit when the work dir is on AFS
-
-Retested on the same cluster: `bash build/reproduce.sh $HOME/tmp/repro-build all` cannot finish inside one
-job. Two runs, 2400 s and 3300 s, were both cut off by the platform in `step 6/6 xmake build`; `step 0/6`
-(building xmake 3.1.2 from source) alone takes 15 min there, against ~112 s on tmpfs. The three-job chain
-above used `mktemp -d ${TMPDIR:-/tmp}/...`, which is why it fits: same work, 29 min including wheel download.
-
-Two consequences, both now handled in the scripts:
-
-1. **Work dir on local storage.** Prefer `$LOCAL_SCRATCH`, then `/tmp`, then `$HOME/tmp`; if only AFS is
-   available, split into two jobs (`STAGE=deps` produces `xmake-toolchain.tgz`, then `XM_PREBUILT=<tgz> all`).
-2. **Dependency download needs mirrors.** The cluster cannot reach `pypi.org`; `reproduce.sh` now tries
-   pypi.org → pypi.tuna.tsinghua.edu.cn → mirrors.aliyun.com → the GitHub tag tarball (direct, then prefixed
-   with `GH_MIRROR`), renames the unpacked tree and verifies `include/pybind11/pybind11.h` before use.
-
-Also measured: `403 LEASE_TIME_LIMIT` for `timeout=3600` (3300 is accepted), and a 1-card request is routed
-through the borrowing path, which the API reports as `PROJECT_ENVIRONMENT_CHANGED_OR_UNAVAILABLE`; native
-8-card submissions are unaffected. Logs of these attempts are not part of the reported chain - the reported
-numbers still come from `chain-xm5` / `chain-b1` / `chain-c2` only.
-
 ## Why the scratch directory matters
 
 The AFS mount used by the cluster answers `rename(2)` between directories with
