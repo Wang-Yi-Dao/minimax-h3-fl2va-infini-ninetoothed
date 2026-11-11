@@ -128,7 +128,7 @@ PYTHONPATH="$W/pylibs:$HOME/pylibs_extra:$PYTHONPATH" python3 -u \
 
 | 路线 | 做什么 | 实测耗时 | 产物来源 |
 |---|---|---|---|
-| **A 从源码编译** | `bash build/reproduce.sh $HOME/tmp/repro-build all` | 工具链 219.099 s + 编译 1713 s + 出片 1004.498 s（三段链） | 本仓库 `src/` 三份源码输入 |
+| **A 从源码编译** | `export SCRATCH=${TMPDIR:-/tmp}/repro-build` 后 `bash build/reproduce.sh "$SCRATCH" all` | 工具链 219.099 s + 编译 1713 s + 出片 1004.498 s（三段链） | 本仓库 `src/` 三份源码输入 |
 | **B 用预编译产物** | 从 Release `v1.2-prebuilt` 下五个 `.so` 放进工作目录 | 下载约 45 MB | 同一条链产出的二进制 |
 
 ### 路线 A：从源码编译（本仓库实测）
@@ -137,10 +137,17 @@ PYTHONPATH="$W/pylibs:$HOME/pylibs_extra:$PYTHONPATH" python3 -u \
 InfiniCore 五个 `.so` 串成一条命令：
 
 ```bash
-bash build/reproduce.sh $HOME/tmp/repro-build all   # 有可写本地盘可换 /dev/shm/repro-build（更快）
-# 产物：$HOME/tmp/repro-build/ic/build/linux/x86_64/release 下五个 .so
+export SCRATCH=${TMPDIR:-/tmp}/repro-build   # 必须是本地盘/内存盘（有 /dev/shm 可用它更快）
+bash build/reproduce.sh "$SCRATCH" all
+# 产物：$SCRATCH/ic/build/linux/x86_64/release 下五个 .so
 # 不传工作目录时脚本按 $LOCAL_SCRATCH → /tmp → $HOME/tmp 自动探活
 ```
+
+> **工作目录必须落在本地盘/内存盘（2026-11-11 复测）**：工作目录放在 AFS（如 `$HOME/tmp/repro-build`）时，
+> 单作业 2400 s 与 3300 s 两种时限都在 `step 6/6 xmake build` 被平台掐断（`step 0/6` 源码编 xmake 一项就吃掉 15 min）；
+> 链上实测那次用的是 `mktemp -d ${TMPDIR:-/tmp}/…`（平台内存盘），同样内容包括 wheel 下载 29 分钟内完成。
+> 拿不到本地盘时按下面两段跑：先 `STAGE=deps` 产出 `xmake-toolchain.tgz`，再 `XM_PREBUILT=… all` 接着编。
+> 依赖下载也做了兜底：集群访问 `pypi.org` 不可用时，脚本按 清华 → 阿里 → GitHub tarball（经 `GH_MIRROR`）依次回退。
 
 | 输入 | 内容 | 大小 / sha256 前缀 |
 |---|---|---|
@@ -176,7 +183,7 @@ Release：<https://github.com/Wang-Yi-Dao/minimax-h3-fl2va-infini-ninetoothed/re
 
 ```bash
 R=https://github.com/Wang-Yi-Dao/minimax-h3-fl2va-infini-ninetoothed/releases/download/v1.2-prebuilt
-D=$HOME/tmp/repro-build/ic/build/linux/x86_64/release
+D=$SCRATCH/ic/build/linux/x86_64/release   # 先 export SCRATCH=${TMPDIR:-/tmp}/repro-build
 mkdir -p "$D"
 for f in _infinicore.cpython-311-x86_64-linux-gnu.so libinfiniop.so \
          libinfinicore_cpp_api.so libinfinirt.so libinfiniccl.so; do
@@ -197,7 +204,7 @@ sha256sum "$D"/*.so                          # 对照下表，五个都要对上
 
 ```bash
 # 2) 用这 5 个 `.so` 覆盖运行时，再跑 50 步 + 官方 compare
-export CRB_LIBS=$HOME/tmp/repro-build/ic/build/linux/x86_64/release
+export CRB_LIBS=$SCRATCH/ic/build/linux/x86_64/release
 bash jobs/run_tp8_fl2va.sh 50 2300
 ```
 
