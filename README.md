@@ -81,10 +81,12 @@ build/    bld_infinicore.sh（InfiniCore 构建配方）、rebuild_and_repack.sh
           from_scratch.sh（只喂三份源码输入的六步构建）、reproduce.sh（一条命令跑通 from_scratch 并校验产物）、
           xmake_build.sh（xmake 源码编译封装）
 input/    reference_fl2va.mp4（官方 compare 的参考片，768×928 / 124 帧 / 24 fps / 1.5 MB，
-          由本项目 legacy PyTorch 路径产出；说明见 input/README.md）
+          由本项目 legacy PyTorch 路径产出）、1280X1280.JPEG（出片首帧，146,182 B）；说明见 input/README.md
+stage/    afs.mjs / afscli.mjs（平台个人存储上传下载）、batch.mjs / gpu.mjs / submit_job.mjs /
+          probe.mjs / watch.mjs / jstop.mjs / res.mjs（批作业提交、探活、轮询、取消、查空闲卡）
 results/  chain_20261110_xmake.txt / _build.txt / _run.txt（从源码重建的三段链完整作业日志，末段含官方
           compare 原始输出 79.493%）、ab_2step_table.md（2 步 A/B 实测）
-docs/     初赛实验报告.md、课程报告.md、提交清单.md
+docs/     初赛实验报告.md、课程报告.md、提交清单.md、从零复现指令流程.md（第三方账户从零复现的逐条指令）
 figures/  compare_chain_jobs.png / compare_chain_log.png（重建链三个作业的列表与日志，官方 compare 79.493%）、
           video_frames_nl50.png（成片第 1/61/124 帧抽帧对照）
 ```
@@ -95,10 +97,15 @@ figures/  compare_chain_jobs.png / compare_chain_log.png（重建链三个作业
 InfiniCore 五个 `.so` 按下一节「两条路」任一条取得（A 从源码编译 / B 取预编译产物），
 模型权重（MiniMax-H3 diffusers 目录）另行获取（不入库）。
 
-两个输入里，**参考片已随仓库提供**（`input/reference_fl2va.mp4`，1.5 MB，768×928/124 帧/24 fps，
-sha256 `e4e470e0…`）；它是官方 compare 的对照视频，换一段结果立刻变（同一成片：本文件 79.493%，
-另一段 768×928 的片只给 28.660%）。首帧 `input/1280X1280.JPEG` 暂未入库，脚本按「仓库 → `$HOME/input/`」
-顺序查找。详见 `input/README.md`。
+两个输入都随仓库提供：**参考片** `input/reference_fl2va.mp4`（1.5 MB，768×928/124 帧/24 fps，
+sha256 `e4e470e0…`）是官方 compare 的对照视频，换一段结果立刻变（同一成片：本文件 79.493%，
+另一段 768×928 的片只给 28.660%）；**首帧** `input/1280X1280.JPEG`（146,182 B，sha256 `e5b7ac83…`）
+由脚本从仓库优先读取，缺失时回退 `$HOME/input/1280X1280.JPEG`，再没有就报 `FIRST_FRAME_MISSING`。
+详见 `input/README.md`。
+
+**新建账户（看不见本项目任何存储）请直接按 [`docs/从零复现指令流程.md`](docs/从零复现指令流程.md) 走**：
+第 0.5 步把 Release `assets-v1` 里的 wheels、InfiniLM 源码、预编译库下载后上传到自己的 `$HOME`，
+再依次提交三个批作业；权重走平台公共路径 `/public/home/aclsylqidf/shared/MiniMax-H3/diffusers`。
 
 ```bash
 # 1) 环境变量与目录
@@ -137,7 +144,7 @@ PYTHONPATH="$W/pylibs:$HOME/pylibs_extra:$PYTHONPATH" python3 -u \
 | 路线 | 做什么 | 实测耗时 | 产物来源 |
 |---|---|---|---|
 | **A 从源码编译** | `bash build/reproduce.sh $HOME/tmp/repro-build all` | 工具链 219.099 s + 编译 1713 s + 出片 1004.498 s（三段链） | 本仓库 `src/` 三份源码输入 |
-| **B 用预编译产物** | 从 Release `v1.2-prebuilt` 下五个 `.so` 放进工作目录 | 下载约 45 MB | 同一条链产出的二进制 |
+| **B 用预编译产物** | 从 Release `assets-v1` 的 `prebuilt-libs.tgz` 取五个 `.so` 放进工作目录 | 下载 13 MB | 同一条链产出的二进制 |
 
 ### 路线 A：从源码编译（本仓库实测）
 

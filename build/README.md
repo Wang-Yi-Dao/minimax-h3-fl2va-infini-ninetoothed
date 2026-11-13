@@ -8,6 +8,13 @@ blob: `src/InfiniCore-snapshot-mit.tar.gz` is the unmodified MIT upstream tree,
 `src/kernels_deployed.tgz` holds the nine-toothed kernel sources (generated C++,
 not object code), and the rest is the scripts that drive the build.
 
+**Third-party accounts (a fresh InfiniFabric account that cannot see this project's storage):**
+the full step-by-step runbook is `../docs/从零复现指令流程.md`. The large assets that are not in git
+live on the repository Releases: `assets-v1` (wheels.tgz 88,134,582 B / InfiniLM-src.tgz 10,441,980 B /
+prebuilt-libs.tgz 13,126,650 B / artifacts-prebuilt.tgz 99,251,173 B / SHA256SUMS) and
+`vendor-fa-dtk2604` (fa_dtk2604_torch290_cp311.whl 658,898,543 B). Model weights stay on the platform
+shared path `/public/home/aclsylqidf/shared/MiniMax-H3/diffusers`.
+
 ## Files
 
 | file | what it is |

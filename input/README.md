@@ -17,8 +17,14 @@
 时，脚本会用 `--model-path` 与 `--first-frame` 现场跑一遍 legacy 生成器（需权重与 GPU，耗时约一次
 legacy 全量生成），得到的参考片正是这一份。
 
-## 1280X1280.JPEG（暂未入库）
+## 1280X1280.JPEG（已入库）
 
-出片首帧，1280×1280 JPEG，取自平台个人存储 `$HOME/input/1280X1280.JPEG`。本机没有原件，
-平台存储接口当前处于维护状态（`list PLATFORM_MAINTENANCE`），恢复后补入本目录。脚本对首帧的
-查找顺序是「仓库 `input/1280X1280.JPEG` → `$HOME/input/1280X1280.JPEG`」，两者都没有时直接报错退出。
+| 项 | 值 |
+|---|---|
+| 用途 | `minimax_h3.py fl2va --first-frame`，出片首帧 |
+| 规格 | 1280×1280 JPEG，146,182 B |
+| sha256 | `e5b7ac8376011c954f1e61d66b7d994434b5d8e7a591f2e792af93ac7db9c279` |
+| 来源 | 平台个人存储 `$HOME/input/1280X1280.JPEG`（2026-11-13 从平台存储接口取回，与本项目出片所用同一文件） |
+
+查找顺序：仓库 `input/1280X1280.JPEG` → `$HOME/input/1280X1280.JPEG`；两者都没有时
+`jobs/run_tp8_fl2va.sh` 打 `FIRST_FRAME_MISSING` 并 `exit 0`（看起来像「成功但没片」，别误判）。
