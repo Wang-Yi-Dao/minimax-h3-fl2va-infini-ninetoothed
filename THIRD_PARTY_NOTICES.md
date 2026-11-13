@@ -21,7 +21,7 @@
 - `src/infinicore_ninetoothed_hygon.patch`：为海光打开九齿的整套上游补丁（含 mrope 九齿实现）
 - `jobs/`、`build/`：集群侧装配、出片、A/B、精度探针、评测与构建配方
 - `input/reference_fl2va.mp4`：我们自己的 legacy 后端跑出的参考片（768×928、124 帧、24 fps），
-  官方 compare 的必需输入；`input/README.md` 记录它的规格、哈希与「换片分数就变」的实测对照
+  官方 compare 的必需输入；`input/README.md` 记录它的规格与「换片分数就变」的实测对照
 
 ## 环境侧适配补丁（不参与模型数值计算）
 
