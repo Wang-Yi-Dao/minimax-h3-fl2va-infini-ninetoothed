@@ -23,7 +23,9 @@ ROOT=$(cd "$HERE/.." && pwd)
 # 这套集群实测 /dev/shm、/tmp、/var/tmp 虽然是 1777 权限，mkdir 仍被拒，
 # 只有 $HOME 可写，所以下面按顺序探活（真的写一个文件），第一个能写的就用。
 pick_work() {
-  for d in ${LOCAL_SCRATCH:-/dev/shm/repro-build} /tmp/repro-build "$HOME/tmp/repro-build"; do
+  # 作业沙箱里 /dev/shm、/tmp 通常不可写，平台把可写的内存盘放在 $TMPDIR，所以先试它。
+  for d in "${TMPDIR:+$TMPDIR/repro-build}" ${LOCAL_SCRATCH:-/dev/shm/repro-build} /tmp/repro-build "$HOME/tmp/repro-build"; do
+    [ -n "$d" ] || continue
     mkdir -p "$d" 2>/dev/null || continue
     touch "$d/.probe" 2>/dev/null || continue
     rm -f "$d/.probe"; echo "$d"; return 0
@@ -65,23 +67,33 @@ XM_TGZ=${XM_TGZ:-$DEPS/xmake-v3.1.2.tar.gz}
 if [ ! -s "$XM_TGZ" ]; then
   echo "--- download xmake 3.1.2 source tree"
   XM_TGZ="$XM_TGZ" GH_MIRROR="$MIR" "$PY" - <<'PYEOF' || { echo "XMAKE_DL_FAIL"; exit 1; }
-import os, sys, urllib.request
+import os, sys, time, urllib.request
 dst = os.environ["XM_TGZ"]
 url = "https://github.com/xmake-io/xmake/releases/download/v3.1.2/xmake-v3.1.2.tar.gz"
-mir = os.environ.get("GH_MIRROR", "https://ghproxy.net/") + url
-for u in (url, mir):
-    try:
-        with urllib.request.urlopen(u, timeout=180) as r:
-            data = r.read()
-        if len(data) < 1000000:
-            raise RuntimeError("short body %d" % len(data))
-        open(dst, "wb").write(data)
-        print("XMAKE_TGZ_BYTES", len(data), u)
+mirs = [os.environ.get("GH_MIRROR", "https://ghproxy.net/"),
+        "https://gh-proxy.com/", "https://ghfast.top/"]
+# 集群出口打不开 github.com；镜像会偶发截断（IncompleteRead），所以逐源重试。
+srcs = [url] + [m + url for m in mirs] + [mirs[0] + url]
+ok = False
+for u in srcs:
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(u, timeout=300) as r:
+                data = r.read()
+            if len(data) < 1000000:
+                raise RuntimeError("short body %d" % len(data))
+            tmp = dst + ".part"
+            open(tmp, "wb").write(data)
+            os.replace(tmp, dst)
+            print("XMAKE_TGZ_BYTES", len(data), u)
+            ok = True
+            break
+        except Exception as exc:
+            print("XMAKE_DL_FAIL", u, "try%d" % (attempt + 1), repr(exc)[:120])
+            time.sleep(2)
+    if ok:
         break
-    except Exception as exc:
-        print("XMAKE_DL_FAIL", u, exc)
-else:
-    sys.exit(1)
+sys.exit(0 if ok else 1)
 PYEOF
 fi
 
@@ -105,14 +117,16 @@ import io, json, os, sys, tarfile, urllib.request
 dst = os.environ["PYBIND11_ROOT"]
 mir = os.environ.get("GH_MIRROR", "https://ghproxy.net/")
 tag = "v3.1.0"
-apis = [
-    "https://pypi.org/pypi/pybind11/3.1.0/json",
-    "https://pypi.tuna.tsinghua.edu.cn/pypi/pybind11/3.1.0/json",
-    "https://mirrors.aliyun.com/pypi/pybind11/3.1.0/json",
-]
+# pypi.org 的带版本 JSON；清华只提供不带版本的 JSON（带版本号会 404）；
+# 阿里没有 JSON API，只有 simple 索引。
+apis_versioned = ["https://pypi.org/pypi/pybind11/3.1.0/json"]
+apis_unversioned = ["https://pypi.tuna.tsinghua.edu.cn/pypi/pybind11/json"]
+simples = ["https://mirrors.aliyun.com/pypi/simple/pybind11/",
+           "https://pypi.tuna.tsinghua.edu.cn/simple/pybind11/"]
 tgzs = [
     "https://github.com/pybind/pybind11/archive/refs/tags/%s.tar.gz" % tag,
     mir + "https://github.com/pybind/pybind11/archive/refs/tags/%s.tar.gz" % tag,
+    "https://gh-proxy.com/https://github.com/pybind/pybind11/archive/refs/tags/%s.tar.gz" % tag,
 ]
 parent = os.path.dirname(os.path.abspath(dst))
 os.makedirs(parent, exist_ok=True)
@@ -122,7 +136,7 @@ def fetch(u, timeout):
         return r.read()
 
 raw = None
-for api in apis:
+for api in apis_versioned:
     try:
         meta = json.load(io.BytesIO(fetch(api, 60)))
         url = next(f["url"] for f in meta["urls"] if f["filename"].endswith(".tar.gz"))
@@ -131,6 +145,37 @@ for api in apis:
         break
     except Exception as exc:
         print("PYBIND11_API_FAIL", api, repr(exc)[:120])
+if raw is None:
+    for api in apis_unversioned:
+        try:
+            meta = json.load(io.BytesIO(fetch(api, 60)))
+            files = meta.get("releases", {}).get("3.1.0", [])
+            url = next(f["url"] for f in files if f["filename"].endswith(".tar.gz"))
+            print("PYBIND11_SDIST", api, url)
+            raw = fetch(url, 300)
+            break
+        except Exception as exc:
+            print("PYBIND11_API_FAIL", api, repr(exc)[:120])
+if raw is None:
+    import re
+    for s in simples:
+        try:
+            html = fetch(s, 60).decode("utf-8", "replace")
+            m = re.search(r'(?:href=")?((?:https?:)?//[^"#]*?pybind11-3\.1\.0\.tar\.gz|\.\./[^"#]*?pybind11-3\.1\.0\.tar\.gz|pybind11-3\.1\.0\.tar\.gz)', html)
+            if not m:
+                raise RuntimeError("no sdist link")
+            link = m.group(1)
+            if link.startswith("//"):
+                link = "https:" + link
+            elif link.startswith("../"):
+                link = s.rsplit("/", 2)[0] + "/" + link[3:]
+            elif not link.startswith("http"):
+                link = s + link
+            print("PYBIND11_SDIST", s, link)
+            raw = fetch(link, 300)
+            break
+        except Exception as exc:
+            print("PYBIND11_SIMPLE_FAIL", s, repr(exc)[:120])
 if raw is None:
     for u in tgzs:
         try:
