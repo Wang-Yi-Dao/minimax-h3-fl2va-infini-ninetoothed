@@ -261,7 +261,7 @@ bash jobs/run_tp8_fl2va.sh 50 2300
 
 - **运行间可复现性**：同一 seed/参数下多次 2 步 A/B 的 SSIM 落在 0.23–0.64，
   输出差异来自 bf16 归约顺序与分配器复用，经扩散采样放大；`results/ab_2step_table.md` 给出多轮实测。
-- 九齿 FA 在 S=27570 相对 torch SDPA 的 mean 相对误差约 4.3%（S=4096 时 0.62%），缺 split-K。
+- 九齿 FA 在 S=27570 相对 torch SDPA 的 mean 相对误差约 4.3%（job `5bdcce87`：cos 0.999082），缺 split-K。
 - head_dim=80 尚未原生实现（当前走零填充 128）；VAE 与采样调度沿用上游 InfiniLM 的 Python 边界。
 - 源码级实现（`src/kb7.py`）需重编 InfiniCore；本次端到端结果使用运行时 shim 形式。
 
