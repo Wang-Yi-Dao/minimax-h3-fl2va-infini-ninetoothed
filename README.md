@@ -88,58 +88,220 @@ figures/  compare_chain_jobs.png / compare_chain_log.png（重建链三个作业
           video_frames_nl50.png（成片第 1/61/124 帧抽帧对照）
 ```
 
-## 复现
+## 从零重建（第三方账户）
 
-前提：海光 DCU 集群（gfx936）、DTK 26.04、Python 3.11、PyTorch 2.9.0+das.opt1.dtk2604，
-InfiniCore 五个 `.so` 按下一节「两条路」任一条取得（A 从源码编译 / B 取预编译产物），
-模型权重（MiniMax-H3 diffusers 目录）另行获取（不入库）。
+本仓库的结果全部来自**从源码重建**：现场编出五个 `.so`，再用它们跑 50 步出片，并由官方 `examples/minimax_h3_compare.py` 评测。
+下面是完整流程的摘要；**逐条命令、期望输出与坑清单见 [`docs/从零复现指令流程.md`](docs/从零复现指令流程.md)**，两份内容一致，文档更细。
 
-两个输入都随仓库提供：**参考片** `input/reference_fl2va.mp4`（1.5 MB，768×928/124 帧/24 fps，
-sha256 `e4e470e0…`）是官方 compare 的对照视频，换一段结果立刻变（同一成片：本文件 79.493%，
-另一段 768×928 的片只给 28.660%）；**首帧** `input/1280X1280.JPEG`（146,182 B，sha256 `e5b7ac83…`）
-由脚本从仓库优先读取，缺失时回退 `$HOME/input/1280X1280.JPEG`，再没有就报 `FIRST_FRAME_MISSING`。
-详见 `input/README.md`。
+流程六步：第 0 步前置检查 → 第 0.5 步资产上传 → 第 1 步取码校验 → 第 2–4 步三段作业（工具链 / 构建 / 出片评测）→ 第 5 步提交 → 第 6 步判读。
 
-**FA（fused attention）依赖**：非 legacy 路径的 VAE / 音频 VAE / 文本编码走 torch 的 SDPA 适配器，需要厂商 flash-attention 的 `.so`。从 Release `vendor-fa-dtk2604` 取 `fa_dtk2604_torch290_cp311.whl`（658,898,543 B，sha256 `8546e46b…`，内含 `flash_attn_2_cuda…so` 2,088,777,840 B），`jobs/setup.py` 解包后把路径写进 `$W/fa_so_path.txt`，出片脚本据此 `export FA_SO_PATH`。缺它时脚本导出的是**空串**，最可能报 `Not load library for Cutlass Fa so`——文档里请按「必需、未验证可省」理解。
+### 第 0 步 前置检查
 
-**新建账户（看不见本项目任何存储）请直接按 [`docs/从零复现指令流程.md`](docs/从零复现指令流程.md) 走**：
-第 0.5 步把 Release `assets-v1` 里的 wheels、InfiniLM 源码、预编译库下载后上传到自己的 `$HOME`，
-再依次提交三个批作业；权重走平台公共路径 `/public/home/aclsylqidf/shared/MiniMax-H3/diffusers`。
+- **平台**：海光 DCU（gfx936）批作业；DTK 26.04 装在 `/opt/dtk`；Python 3.11（cp311）；PyTorch 2.9.0+das.opt1.dtk2604。
+- **模型权重**：平台公共路径 `/public/home/aclsylqidf/shared/MiniMax-H3/diffusers`（不随仓库分发）。先确认四样都在：
+
+  ```bash
+  SH=/public/home/aclsylqidf/shared/MiniMax-H3/diffusers
+  ls $SH/model_index.json $SH/transformer $SH/vae $SH/audio_vae   # 四条都要存在
+  ```
+
+- **FA 依赖**：非 legacy 路径的 VAE / 音频 VAE / 文本编码走 torch 的 SDPA 适配器，需要厂商 flash-attention 的 `.so`。
+  从 Release `vendor-fa-dtk2604` 取 `fa_dtk2604_torch290_cp311.whl`（658,898,543 B，sha256 `8546e46b…`，内含
+  `flash_attn_2_cuda…so` 2,088,777,840 B），`jobs/setup.py` 解包后把路径写进 `$W/fa_so_path.txt`，出片脚本据此 `export FA_SO_PATH`。
+  缺它时导出的是**空串**，最可能报 `Not load library for Cutlass Fa so`——按「必需、未验证可省」理解。
+
+### 第 0.5 步 资产下载到本机 → 上传到你自己的 `$HOME`
+
+Release `assets-v1`：<https://github.com/Wang-Yi-Dao/minimax-h3-fl2va-infini-ninetoothed/releases/tag/assets-v1>
+
+| 资产 | 大小 | 上传到你的 `$HOME` 下 | 用途 |
+|---|---|---|---|
+| `SHA256SUMS` | 4,413 B | — | 校验清单 |
+| `wheels.tgz` | 88,134,582 B | `minimax_h3/wheels.tgz` | 27 个 `.whl`（transformers 5.14.1 等） |
+| `InfiniLM-src.tgz` | 10,441,980 B | `src/InfiniLM.tgz` | 引擎源码树（`jobs/setup.py` 解包） |
+| `prebuilt-libs.tgz` | 13,126,650 B | `minimax_h3/prebuilt-libs.tgz` | 五个 `.so` + `xmake-toolchain.tgz`（Plan B / 跳过工具链） |
+| `artifacts-prebuilt.tgz` | 99,251,173 B | `minimax_h3/artifacts-prebuilt.tgz` | 运行期打包，解出 `artifacts/{infinicore,infinilm}.tgz` |
+| `vendor-fa-dtk2604/fa_dtk2604_torch290_cp311.whl` | 658,898,543 B | `minimax_h3/wheels5/…whl` | 厂商 FA（见第 0 步） |
 
 > **Release 资产要在你自己的电脑上下载，不要在集群节点上 curl。**
 > 2026-11-13 在批作业里实测：`github.com`（含 Release 直链）、`codeload.github.com` 一律返回 `000`，
-> 集群出口只有镜像通道（`gh-proxy.com`、`ghproxy.net`）和 PyPI（`pypi.org`、`pypi.sourcefind.cn`）通。
-> 所以正确姿势是：本机浏览器/curl 下载 Release 里的文件 → 平台「个人存储」上传到 `$HOME/minimax_h3/…` →
-> 作业里再用。仓库代码本身可以直接在作业里取（走 `gh-proxy.com` 镜像）。
+> 集群出口只有镜像（`gh-proxy.com`、`ghproxy.net`）与 PyPI（`pypi.org`、`pypi.sourcefind.cn`）通。
+> 正确姿势：本机下载 → 平台「个人存储」上传到 `$HOME/minimax_h3/…` → 作业里再用。仓库代码本身可以在作业里取（走镜像）。
 
 ```bash
-# 1) 环境变量与目录
-export W=$HOME/mmh3_ws AFS=$HOME/artifacts SH=/public/home/aclsylqidf/shared/MiniMax-H3/diffusers
-REPO=$(pwd)   # 本仓库根（含 input/reference_fl2va.mp4 与 src/）
-
-# 2) 解包 + 装配运行环境（InfiniCore/InfiniLM/模型软链/评测依赖）
-python3 $W/jobs/setup.py $W $AFS $SH
-
-# 3) 编译设备键 shim 并预加载（8 卡必需，见 src/pre_ctxid.c 注释）
-/opt/dtk/llvm/bin/clang -shared -fPIC -O2 -o $W/pre_ctxid.so $W/src/pre_ctxid.c -ldl
-export LD_PRELOAD=$W/pre_ctxid.so:${LD_PRELOAD:-}
-export HIP_LAUNCH_BLOCKING=1   # 多卡执行次序确定（可复现性，见上）
-
-# 4) TP8 / 124 帧 / 50 步 / seed 42 出片
-python3 -u $W/InfiniLM/examples/minimax_h3.py fl2va \
-  --model-path "$W/model" --text "A dog falls asleep" \
-  --first-frame "$REPO/input/1280X1280.JPEG" \
-  --gpus 0,1,2,3,4,5,6,7 --num-frames 124 --steps 50 --seed 42 \
-  --output "$W/out/nl_50.mp4"
-
-# 5) 官方评测（口径：灰度、长边≤512、data_range=255、逐帧算术平均）
-PYTHONPATH="$W/pylibs:$HOME/pylibs_extra:$PYTHONPATH" python3 -u \
-  $W/InfiniLM/examples/minimax_h3_compare.py --tasks fl2va --output-dir "$W/cmpout" \
-  --model-path "$W" --reference-fl2va-video "$REPO/input/reference_fl2va.mp4" \
-  --infinilm-fl2va-video "$W/out/nl_50.mp4"
+mkdir -p assets && cd assets
+BASE=https://github.com/Wang-Yi-Dao/minimax-h3-fl2va-infini-ninetoothed/releases/download
+curl -fL -o SHA256SUMS             "$BASE/assets-v1/SHA256SUMS"
+curl -fL -o wheels.tgz             "$BASE/assets-v1/wheels.tgz"
+curl -fL -o InfiniLM-src.tgz       "$BASE/assets-v1/InfiniLM-src.tgz"
+curl -fL -o prebuilt-libs.tgz      "$BASE/assets-v1/prebuilt-libs.tgz"
+curl -fL -o artifacts-prebuilt.tgz "$BASE/assets-v1/artifacts-prebuilt.tgz"
+curl -fL -o fa_dtk2604_torch290_cp311.whl "$BASE/vendor-fa-dtk2604/fa_dtk2604_torch290_cp311.whl"
+sha256sum -c SHA256SUMS --ignore-missing
 ```
 
-批作业平台上的等价封装见 `jobs/run_tp8_fl2va.sh`（含 fail-fast 看门狗与日志归档）。
+上传后在平台的开发终端 / notebook 里解包（**不需要算力卡**）：
+
+```bash
+# 1) wheels：27 个 .whl
+mkdir -p $HOME/minimax_h3/wheels && tar xzf $HOME/minimax_h3/wheels.tgz -C $HOME/minimax_h3
+ls $HOME/minimax_h3/wheels/*.whl | wc -l          # 期望 27
+
+# 2) artifacts：必须是 $HOME/minimax_h3/artifacts/{infinicore,infinilm}.tgz
+#    jobs/setup.py 的 restore_tars() 打开这两个文件，缺了作业 C 会 STEP_FAIL 退出 21
+cd $HOME/minimax_h3 && tar xzf artifacts-prebuilt.tgz && ls -l artifacts/
+
+# 3) Plan B 才需要：五个 .so
+cd $HOME/minimax_h3 && tar xzf prebuilt-libs.tgz && ls -l prebuilt/libs/ | head
+```
+
+**关键件**：`transformers-5.14.1-py3-none-any.whl`（镜像自带 5.0.0 会被 `setup.py` 跳过）、`diffusers-0.41.0`、`tokenizers-0.22.1`、`safetensors-0.8.0`。
+
+### 第 1 步 取代码 + 校验源码输入
+
+```bash
+cd $HOME && git clone https://github.com/Wang-Yi-Dao/minimax-h3-fl2va-infini-ninetoothed.git repo && cd repo
+cd src && sha256sum -c SHA256SUMS && cd ..
+```
+
+| 源码输入 | 内容 | 大小 / sha256 前缀 |
+|---|---|---|
+| `src/InfiniCore-snapshot-mit.tar.gz` | 上游 InfiniCore 快照（MIT，含 LICENSE） | 3,759,864 B / `620d40e2` |
+| `src/overlay.tar.gz` | 我们改动的 9 个源文件，根为 `ic/` | 19,254 B / `f1f28f73` |
+| `src/kernels_deployed.tgz` | 出片所用库的九齿 kernel 源码 `ic/build/ninetoothed/`（106 文件） | 2,457,374 B / `fbf98247` |
+| `src/infinicore_ninetoothed_hygon.patch` | 为 HYGON 打开九齿的上游补丁 | 52,648 B |
+
+节点直连 GitHub 常失败，镜像**由你自选**（也可本机下载 tar 包后上传）：
+
+```bash
+REL=https://github.com/Wang-Yi-Dao/minimax-h3-fl2va-infini-ninetoothed/archive/refs/heads/main.tar.gz
+MIRROR=${MIRROR:-https://gh-proxy.com/}      # 留空即直连
+curl -fL --http1.1 --retry 3 --retry-delay 3 -m 600 -o repo.tgz "$MIRROR$REL" \
+  || curl -fL --http1.1 --retry 3 --retry-delay 3 -m 600 -o repo.tgz "https://ghproxy.net/$REL"
+tar xzf repo.tgz
+```
+
+2026-11-13 节点实测（仅供选型）：直连 `github.com`、`codeload.github.com` = `000`；`gh-proxy.com` 5 s 成功；`ghproxy.net` 偶发 `curl: (92) HTTP/2 stream not closed cleanly`。
+
+### 第 2 步 作业 A：编工具链
+
+**工作目录由你决定**：`reproduce.sh` 的第一个参数是工作目录，源码、xmake 源码树、pybind11、九齿 AOT 中间文件、构建产物全放它下面。
+要能写、建议 ≥10 GB，同一条链上沿用同一路径：
+
+```bash
+W=$HOME/mmh3_build                       # 持久盘（作业结束还在，可续跑）
+W=${TMPDIR:-/tmp}/mmh3_build             # 节点内存盘（更快，作业结束即消失）
+W=/your/own/writable/dir/mmh3_build      # 你自己的挂载点
+mkdir -p "$W" && touch "$W/.p" && rm -f "$W/.p" && echo "WORKDIR=$W"
+```
+
+参考（2026-11-13 实测，不是要求）：平台批作业里 `/dev/shm`、`/tmp`、`/var/tmp` 的根目录 `mkdir` 会被拒，能写的是 `$HOME` 与平台给的 `$TMPDIR`；你自己的环境未必一样，先用 `touch` 探一下。
+
+```bash
+bash build/reproduce.sh "$W" deps
+```
+
+判据：`XMAKE_TGZ=<字节数>`、`DEPS_OK xmake_prebuilt=<tgz> <字节数> B`。也可以直接用 `prebuilt-libs.tgz` 里的 `xmake-toolchain.tgz` 当 `XM_PREBUILT`，跳过本步。
+
+### 第 3 步 作业 B：六步构建
+
+**两段（主线）**：作业 A 编好工具链，作业 B 只编 InfiniCore；被掐断只重跑作业 B。
+
+```bash
+XM_PREBUILT=<作业A产出的 xmake tgz> bash build/reproduce.sh "$W" build
+```
+
+**一次性**：不拆作业，`all` 把工具链和构建一起做完（作业时长宽裕时可用）。
+
+```bash
+bash build/reproduce.sh "$W" all
+```
+
+两种跑法产出的五个 `.so` 完全一样（同一条构建路径），差别只在「一个作业要跑多久」：一次性中途被掐断，前面编的工具链一起丢；两段的工具链 tgz 已落盘，重跑作业 B 即可。
+
+判据：每 90 s 打 `--- build <行数> <error数> <最后一个 step>`；结尾必须有 `SO_COUNT=5/5` 与 `REPRO_OK secs=… libs=…`。
+被掐断后同目录续跑：`CRB_RESUME=1 XM_PREBUILT=… bash build/reproduce.sh "$W" build`。
+六步构建的逐条原始命令（20 条）见 `docs/从零复现指令流程.md` 附录 A；`reproduce.sh` 就是这 20 条的封装。
+
+### 第 4 步 作业 C：出片 + 官方比对
+
+```bash
+CRB_LIBS=<作业B的 libs 目录> bash jobs/run_tp8_fl2va.sh 50 1600
+```
+
+期望输出：
+
+```
+SETUP_EXIT=0 … SETUP_OK
+FRESH_LIBS_FROM=<作业B libs>   FRESH libinfiniop.so 30752880 …
+FIRST_FRAME=…/input/1280X1280.JPEG
+RUN_RC=0 failed=0 run_secs=909 steps=50 sec_per_step=18.18
+GET_MP4 bytes=1615256
+Size: PASS (768x928)   Length: PASS (124 frames)   Average SSIM: 79.493%
+CMP_RC=0
+```
+
+真值只认**本次**的 `$W/logs/nn38_cmp.log`：脚本末行 grep 的是旧名 `nn28_cmp.log`，可能命中上一次运行（已知小坑）。
+
+### 第 5 步 平台提交（网页批作业）
+
+平台网页「批作业」页面即可完成，不需要任何脚本：
+
+1. **项目**：在自己账户里新建（或用已有）项目，把 entrypoint 脚本放进项目文件。**项目内单文件 ≤ 16 KiB**，超了 403；大 python 拆成独立项目文件由 sh 调用。
+2. **配置**：`entrypoint = <脚本名>.sh`、`args` 留空、`kind = batch`。
+3. **表单**：资源范围选 `unit`；**卡数与超时按你账户此刻能拿到的填**（页面 preflight 会告诉你哪些卡数 `allowed`、哪些环境 `ready=true` 且 `modes` 含 `batch`）。
+4. **看结果**：卡片 `Queued → Running → Succeeded / Cancelled`；判据就是第 2–4 步那几条 `XMAKE_TGZ` / `SO_COUNT=5/5` / `REPRO_OK` / `RUN_RC=0` / `Average SSIM` / `CMP_RC=0`。
+5. **报错立刻取消**：不要占着卡排错；取消后到「资源」页面确认空闲卡已恢复。
+
+三条硬规矩：**别选到「走临借通道」的卡数档**（会报成误导性的 `PROJECT_ENVIRONMENT_CHANGED_OR_UNAVAILABLE`）；
+**项目单文件 ≤ 16 KiB**；**环境列表里没有 `ready=true` 的条目就别提交**（会返回 `PROJECT_NO_COMPATIBLE_CERTIFIED_NODE`，等平台侧恢复，别反复重试）。
+
+### 第 6 步 判读
+
+四条同时成立才算复现成功：`SO_COUNT=5/5`、`RUN_RC=0 failed=0`、`Size`/`Length` 两个 PASS、`CMP_RC=0`，且 SSIM 与 79.493% 同量级。
+SSIM 口径：RGB→灰度、长边缩到 512、`data_range=255`、逐帧 `structural_similarity` 求均值。
+
+### 重建链实测（`results/`，8 卡，干净工作区，只喂三份源码输入）
+
+三个作业构成一条链，**没有任何预置二进制包**：工具链由 xmake 源码编出，下游作业只读继承上游产物。
+
+| 作业 | 做什么 | 实测 | 产物 |
+|---|---|---|---|
+| `jobs/repro_xmake_step.sh` | 从 xmake 3.1.2 源码编工具链 | `XMP_OK`，219.099 s / 1753 卡秒 | `chain/20261110_045748/xmake-toolchain.tgz` 1,666,845 B |
+| `jobs/repro_build.sh` | 校验三份 sha256 → 解快照/overlay → 打补丁 → 编五个 `.so` | `REPRO_OK secs=1713`，1841.813 s / 14735 卡秒 | `chain/20261110_050314/libs` |
+| `jobs/repro_run.sh` | 只读 chain 里的 `.so`，跑 50 步 FL2VA + 官方 compare | `RUN_RC=0 failed=0`，18.18 s/step（909 s），1004.498 s / 8036 卡秒 | `nl_50.mp4` + compare 结果 |
+
+产物与结果：
+
+| 项目 | 实测值 |
+|---|---|
+| 五个 `.so` | 见下方 Plan B 表（尺寸与 sha256 一致） |
+| 官方 compare | `Size: PASS (768x928)`、`Length: PASS (124 frames)`、**`Average SSIM: 79.493%`**、`CMP_RC=0` |
+
+一条实情：chain-b1 提交时脚本还没认链上工具链（`XM_PREBUILT` 当时只在 `STAGE=build` 生效），所以它在作业内又自举了一遍 xmake
+（内存盘上约 2 分钟，日志里可见 `--- download xmake 3.1.2 source tree`），随后照常编出五个 `.so`；整条链仍是 100% 从源码起。
+该分支此后已修好（任何 `STAGE` 都优先用链上 `xmake-toolchain.tgz`）。
+
+原始日志：`results/chain_20261110_xmake.txt`、`_build.txt`、`_run.txt`；踩坑清单见 `docs/从零复现指令流程.md`。
+
+### Plan B：预编译库兜底（**不是从零重建**）
+
+从零重建跑不通时（时限、网络、镜像变化），可直接用 Release 里的五个 `.so` 出片，验证「模型 + 环境 + 官方 compare」这条链：
+
+```bash
+tar xzf $HOME/minimax_h3/prebuilt-libs.tgz -C $HOME/minimax_h3
+CRB_LIBS=$HOME/minimax_h3/prebuilt/libs bash jobs/run_tp8_fl2va.sh 50 1600
+```
+
+| 文件 | 大小 | sha256 |
+|---|---|---|
+| `libinfiniop.so` | 30,752,880 B | `a3847eeaba99fd23d7e2dce894a0002a9e2835cd8d82340bb46f6ebeb78b46fc` |
+| `libinfinicore_cpp_api.so` | 13,264,224 B | `b39722882f7846b0ffd4016414803ad79a72ad30604f3d6176b9ba168c37dcb9` |
+| `_infinicore.cpython-311-x86_64-linux-gnu.so` | 1,612,400 B | `41d649f73e209c42ee4949761eb63ca75eeff918d49ce89c5aba594f95f3dc04` |
+| `libinfiniccl.so` | 52,104 B | `81183241721bbacca06afa8a269ec3c2bbe80a09f74527a6690d53d4a35d2bf3` |
+| `libinfinirt.so` | 48,184 B | `1993bdeba63c137758fc2cb9d8ae772d6fdeb94999de260373ab52e1f4c7a467` |
+
+同一批二进制也可从 Release `v1.2-prebuilt` 单独取（五个文件，不走 tar 包）。这条路线只能证明运行侧可用，**不得与从零重建的结果混写**。
 
 ## 构建前提
 
@@ -152,116 +314,8 @@ PYTHONPATH="$W/pylibs:$HOME/pylibs_extra:$PYTHONPATH" python3 -u \
 | pybind11 | 3.1.0，解包后 `include/pybind11/pybind11.h` 必须存在 | 四源回退（pypi → 清华 → 阿里 → GitHub tarball），全失败报 `PYBIND11_DL_FAIL` |
 | ninetoothed | 0.26.0（海光定制，基于 triton 3.5.1） | `build/fetch_wheels.py` 取；triton 必须是海光 build 的 plain build |
 | 环境变量 | `DTK=/opt/dtk J=32 ARCH=gfx936 PHASE=all` | `build/reproduce.sh` 有同名缺省值 |
-| 网络 | 计算节点常连不上 GitHub / PyPI | 设 `GH_MIRROR`（缺省 `https://ghproxy.net/`），或预置 `XM_TGZ`、`PYBIND11_ROOT` 免下载 |
-| 工作目录 | 必须本地盘：`/dev/shm` → `/tmp` → `$HOME/tmp` | 放 AFS 上编 xmake 要 15 min+，会顶到单作业时限 |
-
-六步构建的逐条命令见 `docs/从零复现指令流程.md` 附录 A；`bash build/reproduce.sh <工作目录> all` 就是这 20 条的封装。
-
-## 两条路：从源码编译 / 直接用预编译产物
-
-两条路的终点完全一样：五个 `.so` 落到同一个目录，再用同一套命令跑 50 步出片与官方 compare。
-按环境选一条——A 完全从源码起（本仓库实测过的那条链），B 直接取我们编好的二进制（省掉约半小时编译）。
-
-| 路线 | 做什么 | 实测耗时 | 产物来源 |
-|---|---|---|---|
-| **A 从源码编译** | `bash build/reproduce.sh $HOME/tmp/repro-build all` | 工具链 219.099 s + 编译 1713 s + 出片 1004.498 s（三段链） | 本仓库 `src/` 三份源码输入 |
-| **B 用预编译产物** | 从 Release `assets-v1` 的 `prebuilt-libs.tgz` 取五个 `.so` 放进工作目录 | 下载 13 MB | 同一条链产出的二进制 |
-
-### 路线 A：从源码编译（本仓库实测）
-
-三份输入全部是源码（无二进制产物），sha256 见 `src/SHA256SUMS`，`build/reproduce.sh` 把校验、xmake 工具链、
-InfiniCore 五个 `.so` 串成一条命令：
-
-```bash
-bash build/reproduce.sh "$W" all   # $W = 你自己选的可写工作目录（本地盘/内存盘更快），先按「从零复现指令流程」第 2 步探一下权限
-# 产物：$HOME/tmp/repro-build/ic/build/linux/x86_64/release 下五个 .so
-# 不传工作目录时脚本按 $LOCAL_SCRATCH → /tmp → $HOME/tmp 自动探活
-```
-
-| 输入 | 内容 | 大小 / sha256 前缀 |
-|---|---|---|
-| `src/InfiniCore-snapshot-mit.tar.gz` | 上游 InfiniCore 快照（MIT，含 LICENSE） | 3,759,864 B / `620d40e2` |
-| `src/overlay.tar.gz` | 我们改动的 9 个源文件，根为 `ic/` | 19,254 B / `f1f28f73` |
-| `src/kernels_deployed.tgz` | 出片所用库的九齿 kernel 源码 `ic/build/ninetoothed/`（106 文件） | 2,457,374 B / `fbf98247` |
-
-集群不能直连 GitHub / PyPI 时，`reproduce.sh` 用 `GH_MIRROR` 换镜像（缺省 `https://ghproxy.net/`），
-也可预置 `XM_TGZ`、`PYBIND11_ROOT` 免下载。pybind11 3.1.0 的获取按 pypi 直连 → 清华镜像 → 阿里镜像 →
-GitHub tag tarball 依次回退，解包后校验 `include/pybind11/pybind11.h` 才继续，四源都失败才报 `PYBIND11_DL_FAIL`。
-
-手工分段（也就是三段链，为什么这么拆见本节末尾的实测表）：
-
-```bash
-# 0) 工具链：需要 xmake >= 3.1.2。官方 bundle 链接 GLIBC_2.38，本镜像只有 2.35，所以 xmake
-#    必须从源码编；又因为计算节点没有可写本地盘、AFS 小文件极慢（实测 cp -a 4008 个文件
-#    要 732 s、make 约 16 个对象/分钟、单个作业有时长上限），这一段单独成链：反复跑
-#    jobs/repro_xmake_step.sh 直到打印 XMP_OK，产出 chain/<ts>/xmake-toolchain.tgz
-#    （安装布局 bin/xmake + share/xmake，下游直接解包即用）。
-export XM_PREBUILT=<上一步产出的 xmake-toolchain.tgz>
-
-# 1) 取三个输入，按上文「构建前提」设好 DTK / pybind11 / wheels
-export IC_TGZ=$PWD/src/InfiniCore-snapshot-mit.tar.gz
-export OVL_TGZ=$PWD/src/overlay.tar.gz
-export CRB_KERNELS_TGZ=$PWD/src/kernels_deployed.tgz
-export DTK=/opt/dtk J=32 ARCH=gfx936 PHASE=all
-bash build/from_scratch.sh        # 6 步：shim -> py 补丁 -> kernel -> dispatcher -> 生成的源码修正 -> xmake
-```
-
-### 路线 B：直接用预编译产物
-
-Release：<https://github.com/Wang-Yi-Dao/minimax-h3-fl2va-infini-ninetoothed/releases/tag/v1.2-prebuilt>
-（五个文件就是路线 A 那条链编出来的同一批二进制，AFS 上 `chain/20261110_050314/libs`）。
-
-```bash
-R=https://github.com/Wang-Yi-Dao/minimax-h3-fl2va-infini-ninetoothed/releases/download/v1.2-prebuilt
-D=$HOME/tmp/repro-build/ic/build/linux/x86_64/release
-mkdir -p "$D"
-for f in _infinicore.cpython-311-x86_64-linux-gnu.so libinfiniop.so \
-         libinfinicore_cpp_api.so libinfinirt.so libinfiniccl.so; do
-  curl -fL --retry 3 -o "$D/$f" "$R/$f"     # 直连不通时前面加 https://ghproxy.net/
-done
-sha256sum "$D"/*.so                          # 对照下表，五个都要对上
-```
-
-| 文件 | 大小 | sha256 |
-|---|---|---|
-| `libinfiniop.so` | 30,752,880 B | `a3847eeaba99fd23d7e2dce894a0002a9e2835cd8d82340bb46f6ebeb78b46fc` |
-| `libinfinicore_cpp_api.so` | 13,264,224 B | `b39722882f7846b0ffd4016414803ad79a72ad30604f3d6176b9ba168c37dcb9` |
-| `_infinicore.cpython-311-x86_64-linux-gnu.so` | 1,612,400 B | `41d649f73e209c42ee4949761eb63ca75eeff918d49ce89c5aba594f95f3dc04` |
-| `libinfiniccl.so` | 52,104 B | `81183241721bbacca06afa8a269ec3c2bbe80a09f74527a6690d53d4a35d2bf3` |
-| `libinfinirt.so` | 48,184 B | `1993bdeba63c137758fc2cb9d8ae772d6fdeb94999de260373ab52e1f4c7a467` |
-
-### 两条路之后（相同）
-
-```bash
-# 2) 用这 5 个 `.so` 覆盖运行时，再跑 50 步 + 官方 compare
-export CRB_LIBS=$HOME/tmp/repro-build/ic/build/linux/x86_64/release
-bash jobs/run_tp8_fl2va.sh 50 2300
-```
-
-### 路线 A 的实测（8 卡，干净工作区，只喂三份源码输入）
-
-三个作业构成一条链，**没有任何预置二进制包**：工具链由 xmake 源码编出，下游作业只读继承上游产物。
-
-| 作业 | 做什么 | 实测 | 产物 |
-|---|---|---|---|
-| `jobs/repro_xmake_step.sh` | 从 xmake 3.1.2 源码编工具链（内存盘里编，AFS 上只放成品） | `XMP_OK`，作业 219.099 s / 1753 卡秒 | `chain/20261110_045748/xmake-toolchain.tgz` 1,666,845 B（sha256 `b201aeb7...`） |
-| `jobs/repro_build.sh` | 校验三份 sha256 -> 解快照/overlay -> 打补丁 -> 编五个 `.so` | `REPRO_OK secs=1713`，作业 1841.813 s / 14735 卡秒 | `chain/20261110_050314/libs` |
-| `jobs/repro_run.sh` | 只读 chain 里的 .so，跑 50 步 FL2VA + 官方 compare | `RUN_RC=0 failed=0`，18.18 s/step（909 s），作业 1004.498 s / 8036 卡秒 | `nl_50.mp4` + compare 结果 |
-
-产物与结果：
-
-| 项目 | 实测值 |
-|---|---|
-| 五个 `.so` | 就是路线 B 表里那五行（尺寸与 sha256 一致） |
-| 官方 compare | `Size: PASS (768x928)`、`Length: PASS (124 frames)`、**`Average SSIM: 79.493%`**、`CMP_RC=0` |
-
-一条实情：chain-b1 提交时脚本还没认链上工具链（`XM_PREBUILT` 当时只在 `STAGE=build` 生效），
-所以它在作业内又自举了一遍 xmake（内存盘上约 2 分钟，日志里可见 `--- download xmake 3.1.2 source tree`），
-随后照常编出五个 `.so`；整条链仍是 100% 从源码起。该分支此后已修好（任何 `STAGE` 都优先用链上
-`xmake-toolchain.tgz`），慢盘环境下用它可省掉重复自举。
-
-原始日志：`results/chain_20261110_xmake.txt`、`results/chain_20261110_build.txt`、`results/chain_20261110_run.txt`；
-细节与踩坑见上文「构建前提」与 `docs/从零复现指令流程.md` 的坑清单。
+| 网络 | 计算节点常连不上 GitHub / PyPI | 镜像自选（`GH_MIRROR`、`MIRROR`），或预置 `XM_TGZ`、`PYBIND11_ROOT` 免下载 |
+| 工作目录 | **由你自选**：本地盘 / 内存盘 / 自己的挂载点，能写且 ≥10 GB | 直接放共享盘上编 xmake 可能慢十倍（我们实测过 15 分钟以上） |
 
 ## 已知限制 / 未完成
 
