@@ -76,9 +76,9 @@ jobs/     setup.py（集群侧解包/装配）、run_tp8_fl2va_cmpgen.sh（TP8 �
           ab_native_vs_legacy.sh（同 seed 2 步 A/B）、
           fa_precision_probe.py（FA 相对 torch SDPA 的精度随 S 变化）、ssim_report.py（同口径 SSIM 汇总）、
           repro_xmake_step.sh（从源码自举 xmake 工具链，可反复续跑）、
-          repro_build.sh（校验 sha256 → 从三份源码重建五个 .so）、repro_run.sh（50 步出片 + 官方 compare）
+          repro_build.sh（从三份源码重建五个 .so）、repro_run.sh（50 步出片 + 官方 compare）
 build/    bld_infinicore.sh（InfiniCore 构建配方）、rebuild_and_repack.sh（改 kernel 后重生成 + 重打包）、
-          from_scratch.sh（只喂三份源码输入的六步构建）、reproduce.sh（一条命令跑通 from_scratch 并校验产物）、
+          from_scratch.sh（只喂三份源码输入的六步构建）、reproduce.sh（一条命令跑通 from_scratch）、
           xmake_build.sh（xmake 源码编译封装）
 input/    reference_fl2va.mp4（官方 compare 的参考片，768×928 / 124 帧 / 24 fps / 1.5 MB，
           由本项目 legacy PyTorch 路径产出）、1280X1280.JPEG（出片首帧，146,182 B）；说明见 input/README.md
@@ -94,7 +94,7 @@ figures/  compare_chain_jobs.png / compare_chain_log.png（重建链三个作业
 本仓库的结果全部来自**从源码重建**：现场编出五个 `.so`，再用它们跑 50 步出片，并由官方 `examples/minimax_h3_compare.py` 评测。
 下面是完整流程的摘要；**逐条命令、期望输出与坑清单见 [`docs/从零复现指令流程.md`](docs/从零复现指令流程.md)**，两份内容一致，文档更细。
 
-流程六步：第 0 步前置检查 → 第 0.5 步资产上传 → 第 1 步取码校验 → 第 2–4 步三段作业（工具链 / 构建 / 出片评测）→ 第 5 步提交 → 第 6 步判读。
+流程六步：第 0 步前置检查 → 第 0.5 步资产上传 → 第 1 步取代码 → 第 2–4 步三段作业（工具链 / 构建 / 出片评测）→ 第 5 步提交 → 第 6 步判读。
 
 ### 第 0 步 前置检查
 
@@ -107,22 +107,21 @@ figures/  compare_chain_jobs.png / compare_chain_log.png（重建链三个作业
   ```
 
 - **FA 依赖**：非 legacy 路径的 VAE / 音频 VAE / 文本编码走 torch 的 SDPA 适配器，需要厂商 flash-attention 的 `.so`。
-  从 Release `vendor-fa-dtk2604` 取 `fa_dtk2604_torch290_cp311.whl`（658,898,543 B，sha256 `8546e46b…`，内含
-  `flash_attn_2_cuda…so` 2,088,777,840 B），`jobs/setup.py` 解包后把路径写进 `$W/fa_so_path.txt`，出片脚本据此 `export FA_SO_PATH`。
+  从 Release `vendor-fa-dtk2604` 取 `fa_dtk2604_torch290_cp311.whl`（内含
+  `flash_attn_2_cuda…so`），`jobs/setup.py` 解包后把路径写进 `$W/fa_so_path.txt`，出片脚本据此 `export FA_SO_PATH`。
   缺它时导出的是**空串**，最可能报 `Not load library for Cutlass Fa so`——按「必需、未验证可省」理解。
 
 ### 第 0.5 步 资产下载到本机 → 上传到 `$HOME`
 
 Release `assets-v1`：<https://github.com/Wang-Yi-Dao/minimax-h3-fl2va-infini-ninetoothed/releases/tag/assets-v1>
 
-| 资产 | 大小 | 放到 `$HOME` 下 | 用途 |
-|---|---|---|---|
-| `SHA256SUMS` | 4,413 B | — | 校验清单 |
-| `wheels.tgz` | 88,134,582 B | `minimax_h3/wheels.tgz` | 27 个 `.whl`（transformers 5.14.1 等） |
-| `InfiniLM-src.tgz` | 10,441,980 B | `src/InfiniLM.tgz` | 引擎源码树（`jobs/setup.py` 解包） |
-| `prebuilt-libs.tgz` | 13,126,650 B | `minimax_h3/prebuilt-libs.tgz` | 五个 `.so` + `xmake-toolchain.tgz`（Plan B / 跳过工具链） |
-| `artifacts-prebuilt.tgz` | 99,251,173 B | `minimax_h3/artifacts-prebuilt.tgz` | 运行期打包，解出 `artifacts/{infinicore,infinilm}.tgz` |
-| `vendor-fa-dtk2604/fa_dtk2604_torch290_cp311.whl` | 658,898,543 B | `minimax_h3/wheels5/…whl` | 厂商 FA（见第 0 步） |
+| 资产 | 放到 `$HOME` 下 | 用途 |
+|---|---|---|
+| `wheels.tgz` | `minimax_h3/wheels.tgz` | 27 个 `.whl`（transformers 5.14.1 等） |
+| `InfiniLM-src.tgz` | `src/InfiniLM.tgz` | 引擎源码树（`jobs/setup.py` 解包） |
+| `prebuilt-libs.tgz` | `minimax_h3/prebuilt-libs.tgz` | 五个 `.so` + `xmake-toolchain.tgz`（Plan B / 跳过工具链） |
+| `artifacts-prebuilt.tgz` | `minimax_h3/artifacts-prebuilt.tgz` | 运行期打包，解出 `artifacts/{infinicore,infinilm}.tgz` |
+| `vendor-fa-dtk2604/fa_dtk2604_torch290_cp311.whl` | `minimax_h3/wheels5/…whl` | 厂商 FA（见第 0 步） |
 
 > **Release 资产先在本机下载，不要在集群节点上 curl。**
 > 2026-11-13 在批作业里实测：`github.com`（含 Release 直链）、`codeload.github.com` 一律返回 `000`，
@@ -132,13 +131,11 @@ Release `assets-v1`：<https://github.com/Wang-Yi-Dao/minimax-h3-fl2va-infini-ni
 ```bash
 mkdir -p assets && cd assets
 BASE=https://github.com/Wang-Yi-Dao/minimax-h3-fl2va-infini-ninetoothed/releases/download
-curl -fL -o SHA256SUMS             "$BASE/assets-v1/SHA256SUMS"
 curl -fL -o wheels.tgz             "$BASE/assets-v1/wheels.tgz"
 curl -fL -o InfiniLM-src.tgz       "$BASE/assets-v1/InfiniLM-src.tgz"
 curl -fL -o prebuilt-libs.tgz      "$BASE/assets-v1/prebuilt-libs.tgz"
 curl -fL -o artifacts-prebuilt.tgz "$BASE/assets-v1/artifacts-prebuilt.tgz"
 curl -fL -o fa_dtk2604_torch290_cp311.whl "$BASE/vendor-fa-dtk2604/fa_dtk2604_torch290_cp311.whl"
-sha256sum -c SHA256SUMS --ignore-missing
 ```
 
 上传后在平台的开发终端 / notebook 里解包（**不需要算力卡**）：
@@ -158,19 +155,19 @@ cd $HOME/minimax_h3 && tar xzf prebuilt-libs.tgz && ls -l prebuilt/libs/ | head
 
 **关键件**：`transformers-5.14.1-py3-none-any.whl`（镜像自带 5.0.0 会被 `setup.py` 跳过）、`diffusers-0.41.0`、`tokenizers-0.22.1`、`safetensors-0.8.0`。
 
-### 第 1 步 取代码 + 校验源码输入
+### 第 1 步 取代码
 
 ```bash
 cd $HOME && git clone https://github.com/Wang-Yi-Dao/minimax-h3-fl2va-infini-ninetoothed.git repo && cd repo
-cd src && sha256sum -c SHA256SUMS && cd ..
+ls -l src/      # 四份源码输入
 ```
 
-| 源码输入 | 内容 | 大小 / sha256 前缀 |
-|---|---|---|
-| `src/InfiniCore-snapshot-mit.tar.gz` | 上游 InfiniCore 快照（MIT，含 LICENSE） | 3,759,864 B / `620d40e2` |
-| `src/overlay.tar.gz` | 改动过的 9 个源文件，根为 `ic/` | 19,254 B / `f1f28f73` |
-| `src/kernels_deployed.tgz` | 出片所用库的九齿 kernel 源码 `ic/build/ninetoothed/`（106 文件） | 2,457,374 B / `fbf98247` |
-| `src/infinicore_ninetoothed_hygon.patch` | 为 HYGON 打开九齿的上游补丁 | 52,648 B |
+| 源码输入 | 内容 |
+|---|---|
+| `src/InfiniCore-snapshot-mit.tar.gz` | 上游 InfiniCore 快照（MIT，含 LICENSE） |
+| `src/overlay.tar.gz` | 改动过的 9 个源文件，根为 `ic/` |
+| `src/kernels_deployed.tgz` | 出片所用库的九齿 kernel 源码 `ic/build/ninetoothed/`（106 文件） |
+| `src/infinicore_ninetoothed_hygon.patch` | 为 HYGON 打开九齿的上游补丁 |
 
 节点直连 GitHub 常失败，镜像可自选（也可本机下载 tar 包后上传）：
 
@@ -293,15 +290,15 @@ SSIM 口径：RGB→灰度、长边缩到 512、`data_range=255`、逐帧 `struc
 
 | 作业 | 做什么 | 实测 | 产物 |
 |---|---|---|---|
-| `jobs/repro_xmake_step.sh` | 从 xmake 3.1.2 源码编工具链 | `XMP_OK`，219.099 s / 1753 卡秒 | `chain/20261110_045748/xmake-toolchain.tgz` 1,666,845 B |
-| `jobs/repro_build.sh` | 校验三份 sha256 → 解快照/overlay → 打补丁 → 编五个 `.so` | `REPRO_OK secs=1713`，1841.813 s / 14735 卡秒 | `chain/20261110_050314/libs` |
+| `jobs/repro_xmake_step.sh` | 从 xmake 3.1.2 源码编工具链 | `XMP_OK`，219.099 s / 1753 卡秒 | `chain/20261110_045748/xmake-toolchain.tgz` |
+| `jobs/repro_build.sh` | 解快照/overlay → 打补丁 → 编五个 `.so` | `REPRO_OK secs=1713`，1841.813 s / 14735 卡秒 | `chain/20261110_050314/libs` |
 | `jobs/repro_run.sh` | 只读 chain 里的 `.so`，跑 50 步 FL2VA + 官方 compare | `RUN_RC=0 failed=0`，18.18 s/step（909 s），1004.498 s / 8036 卡秒 | `nl_50.mp4` + compare 结果 |
 
 产物与结果：
 
 | 项目 | 实测值 |
 |---|---|
-| 五个 `.so` | 见下方 Plan B 表（尺寸与 sha256 一致） |
+| 五个 `.so` | 见下方 Plan B 清单（同名、同顺序） |
 | 官方 compare | `Size: PASS (768x928)`、`Length: PASS (124 frames)`、**`Average SSIM: 79.493%`**、`CMP_RC=0` |
 
 一条实情：chain-b1 提交时脚本还没认链上工具链（`XM_PREBUILT` 当时只在 `STAGE=build` 生效），所以它在作业内又自举了一遍 xmake
@@ -319,13 +316,7 @@ tar xzf $HOME/minimax_h3/prebuilt-libs.tgz -C $HOME/minimax_h3
 CRB_LIBS=$HOME/minimax_h3/prebuilt/libs bash jobs/run_tp8_fl2va_cmpgen.sh 50 1600
 ```
 
-| 文件 | 大小 | sha256 |
-|---|---|---|
-| `libinfiniop.so` | 30,752,880 B | `a3847eeaba99fd23d7e2dce894a0002a9e2835cd8d82340bb46f6ebeb78b46fc` |
-| `libinfinicore_cpp_api.so` | 13,264,224 B | `b39722882f7846b0ffd4016414803ad79a72ad30604f3d6176b9ba168c37dcb9` |
-| `_infinicore.cpython-311-x86_64-linux-gnu.so` | 1,612,400 B | `41d649f73e209c42ee4949761eb63ca75eeff918d49ce89c5aba594f95f3dc04` |
-| `libinfiniccl.so` | 52,104 B | `81183241721bbacca06afa8a269ec3c2bbe80a09f74527a6690d53d4a35d2bf3` |
-| `libinfinirt.so` | 48,184 B | `1993bdeba63c137758fc2cb9d8ae772d6fdeb94999de260373ab52e1f4c7a467` |
+`prebuilt/libs/` 下五个文件：`libinfiniop.so`、`libinfinicore_cpp_api.so`、`_infinicore.cpython-311-x86_64-linux-gnu.so`、`libinfiniccl.so`、`libinfinirt.so`。
 
 同一批二进制也可从 Release `v1.2-prebuilt` 单独取（五个文件，不走 tar 包）。这条路线只能证明运行侧可用，**不得与从零重建的结果混写**。
 
