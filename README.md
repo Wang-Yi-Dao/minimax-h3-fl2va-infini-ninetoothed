@@ -173,7 +173,7 @@ PYTHONPATH="$W/pylibs:$HOME/pylibs_extra:$PYTHONPATH" python3 -u \
 InfiniCore 五个 `.so` 串成一条命令：
 
 ```bash
-bash build/reproduce.sh $HOME/tmp/repro-build all   # 有可写本地盘可换 /dev/shm/repro-build（更快）
+bash build/reproduce.sh "$W" all   # $W = 你自己选的可写工作目录（本地盘/内存盘更快），先按「从零复现指令流程」第 2 步探一下权限
 # 产物：$HOME/tmp/repro-build/ic/build/linux/x86_64/release 下五个 .so
 # 不传工作目录时脚本按 $LOCAL_SCRATCH → /tmp → $HOME/tmp 自动探活
 ```
@@ -193,7 +193,7 @@ GitHub tag tarball 依次回退，解包后校验 `include/pybind11/pybind11.h` 
 ```bash
 # 0) 工具链：需要 xmake >= 3.1.2。官方 bundle 链接 GLIBC_2.38，本镜像只有 2.35，所以 xmake
 #    必须从源码编；又因为计算节点没有可写本地盘、AFS 小文件极慢（实测 cp -a 4008 个文件
-#    要 732 s、make 约 16 个对象/分钟、单作业上限 3200 s），这一段单独成链：反复跑
+#    要 732 s、make 约 16 个对象/分钟、单个作业有时长上限），这一段单独成链：反复跑
 #    jobs/repro_xmake_step.sh 直到打印 XMP_OK，产出 chain/<ts>/xmake-toolchain.tgz
 #    （安装布局 bin/xmake + share/xmake，下游直接解包即用）。
 export XM_PREBUILT=<上一步产出的 xmake-toolchain.tgz>
