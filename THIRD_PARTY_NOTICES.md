@@ -10,7 +10,7 @@
 | PyTorch | 2.9.0+das.opt1.dtk2604 | 参考实现 / legacy 路径 / 评测 | BSD-3-Clause |
 | diffusers / transformers | 0.41.0 / 5.14.1 | 模型加载、processor 装配、pipeline | Apache-2.0 |
 | MiniMax-H3 权重 | 集群共享目录 `/public/home/aclsylqidf/shared/MiniMax-H3/diffusers` | 模型权重，**不随仓库分发** | 见官方模型许可 |
-| FL2VA 参考片 | 仓库内 `input/reference_fl2va.mp4`（1,564,995 B，sha256 `e4e470e0…`） | 官方 compare 的对照视频；**本项目 legacy PyTorch 路径自产**，非第三方素材 | 随本仓库 |
+| FL2VA 参考片 | 仓库内 `input/reference_fl2va.mp4`（1,564,995 B） | 官方 compare 的对照视频；**本项目 legacy PyTorch 路径自产**，非第三方素材 | 随本仓库 |
 | scikit-image / imageio / PyAV | 评测环境 | 官方 compare 的 SSIM 与解码 | BSD / BSD / Apache-2.0 |
 
 ## 我们自己的文件
