@@ -106,6 +106,12 @@ sha256 `e4e470e0…`）是官方 compare 的对照视频，换一段结果立刻
 第 0.5 步把 Release `assets-v1` 里的 wheels、InfiniLM 源码、预编译库下载后上传到自己的 `$HOME`，
 再依次提交三个批作业；权重走平台公共路径 `/public/home/aclsylqidf/shared/MiniMax-H3/diffusers`。
 
+> **Release 资产要在你自己的电脑上下载，不要在集群节点上 curl。**
+> 2026-11-13 在批作业里实测：`github.com`（含 Release 直链）、`codeload.github.com` 一律返回 `000`，
+> 集群出口只有镜像通道（`gh-proxy.com`、`ghproxy.net`）和 PyPI（`pypi.org`、`pypi.sourcefind.cn`）通。
+> 所以正确姿势是：本机浏览器/curl 下载 Release 里的文件 → 平台「个人存储」上传到 `$HOME/minimax_h3/…` →
+> 作业里再用。仓库代码本身可以直接在作业里取（走 `gh-proxy.com` 镜像）。
+
 ```bash
 # 1) 环境变量与目录
 export W=$HOME/mmh3_ws AFS=$HOME/artifacts SH=/public/home/aclsylqidf/shared/MiniMax-H3/diffusers
