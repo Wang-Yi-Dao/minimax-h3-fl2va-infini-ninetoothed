@@ -23,7 +23,7 @@ CMP_RC=0
 这一份结果出自仓库当前代码的**从源码重建**：现场编出五个 `.so`，再用它们跑同一份配置出片并评测
 （见下文「重建链实测」表）；出片前的启动脚本固定 `HIP_LAUNCH_BLOCKING=1`（见下）。
 
-成片本身（`output2/nl50_1110_053831.mp4`，1,615,256 B）
+成片本身（`output2/nl50_1110_053831.mp4`）
 本地 ffprobe 复核为 h264 768×928 / 124 帧 / 24 fps / 含 aac 音轨，与 compare 的 `Size` / `Length` PASS 一致；
 该文件较大未入库，如需可与平台作业 `64df924122964eacbd7787e2a4c76369` 的记录核对。
 
@@ -80,8 +80,8 @@ jobs/     setup.py（集群侧解包/装配）、run_tp8_fl2va_cmpgen.sh（TP8 �
 build/    bld_infinicore.sh（InfiniCore 构建配方）、rebuild_and_repack.sh（改 kernel 后重生成 + 重打包）、
           from_scratch.sh（只喂三份源码输入的六步构建）、reproduce.sh（一条命令跑通 from_scratch）、
           xmake_build.sh（xmake 源码编译封装）
-input/    reference_fl2va.mp4（官方 compare 的参考片，768×928 / 124 帧 / 24 fps / 1.5 MB，
-          由本项目 legacy PyTorch 路径产出）、1280X1280.JPEG（出片首帧，146,182 B）；说明见 input/README.md
+input/    reference_fl2va.mp4（官方 compare 的参考片，768×928 / 124 帧 / 24 fps，
+          由本项目 legacy PyTorch 路径产出）、1280X1280.JPEG（出片首帧）；说明见 input/README.md
 results/  chain_20261110_xmake.txt / _build.txt / _run.txt（从源码重建的三段链完整作业日志，末段含官方
           compare 原始输出 79.493%）、ab_2step_table.md（2 步 A/B 实测）
 docs/     从零复现指令流程.md（逐条复现指令）
