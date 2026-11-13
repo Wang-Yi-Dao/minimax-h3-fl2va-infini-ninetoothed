@@ -8,7 +8,7 @@
 | InfiniCore | `$HOME/src/` 上游源码树 + 本项目补丁 `src/infinicore_ninetoothed_hygon.patch` | 算子层、九齿后端注册、attention 桥接 | 见上游仓库 |
 | nine-toothed | 0.26.0（海光定制，基于 triton 3.5.1） | AOT 生成 kernel（flash_attention / swiglu / rms_norm / mrope / timestep_embedding） | 见上游仓库 |
 | PyTorch | 2.9.0+das.opt1.dtk2604 | 参考实现 / legacy 路径 / 评测 | BSD-3-Clause |
-| diffusers / transformers | 0.40.0 / 5.14.1 | 模型加载、processor 装配、pipeline | Apache-2.0 |
+| diffusers / transformers | 0.41.0 / 5.14.1 | 模型加载、processor 装配、pipeline | Apache-2.0 |
 | MiniMax-H3 权重 | 集群共享目录 `/public/home/aclsylqidf/shared/MiniMax-H3/diffusers` | 模型权重，**不随仓库分发** | 见官方模型许可 |
 | FL2VA 参考片 | 仓库内 `input/reference_fl2va.mp4`（1,564,995 B，sha256 `e4e470e0…`） | 官方 compare 的对照视频；**本项目 legacy PyTorch 路径自产**，非第三方素材 | 随本仓库 |
 | scikit-image / imageio / PyAV | 评测环境 | 官方 compare 的 SSIM 与解码 | BSD / BSD / Apache-2.0 |
