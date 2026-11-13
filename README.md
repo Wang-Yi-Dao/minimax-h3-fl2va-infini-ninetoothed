@@ -2,7 +2,7 @@
 
 嵩山杯（2026 秋季高级人工智能）初赛作品代码仓库，队伍 **zzucs123**。
 
-本仓库只包含**我们自己写的代码、补丁、作业脚本与实测结果**；上游 InfiniLM / InfiniCore / nine-toothed
+本仓库只包含**自研代码、补丁、作业脚本与实测结果**；上游 InfiniLM / InfiniCore / nine-toothed
 以补丁形式给出，不复制其完整源码（体积与许可原因，见 `THIRD_PARTY_NOTICES.md`）。
 
 ## 一句话结果
@@ -21,7 +21,7 @@ CMP_RC=0
 ```
 
 这一份结果出自仓库当前代码的**从源码重建**：现场编出五个 `.so`，再用它们跑同一份配置出片并评测
-（见「从源码重建」一节的实测表）；出片前的启动脚本固定 `HIP_LAUNCH_BLOCKING=1`（见下）。
+（见下文「重建链实测」表）；出片前的启动脚本固定 `HIP_LAUNCH_BLOCKING=1`（见下）。
 
 成片本身（`output2/nl50_1110_053831.mp4`，1,615,256 B）
 本地 ffprobe 复核为 h264 768×928 / 124 帧 / 24 fps / 含 aac 音轨，与 compare 的 `Size` / `Length` PASS 一致；
@@ -84,12 +84,12 @@ input/    reference_fl2va.mp4（官方 compare 的参考片，768×928 / 124 帧
           由本项目 legacy PyTorch 路径产出）、1280X1280.JPEG（出片首帧，146,182 B）；说明见 input/README.md
 results/  chain_20261110_xmake.txt / _build.txt / _run.txt（从源码重建的三段链完整作业日志，末段含官方
           compare 原始输出 79.493%）、ab_2step_table.md（2 步 A/B 实测）
-docs/     从零复现指令流程.md（第三方账户从零复现的逐条指令）
+docs/     从零复现指令流程.md（逐条复现指令）
 figures/  compare_chain_jobs.png / compare_chain_log.png（重建链三个作业的列表与日志，官方 compare 79.493%）、
           video_frames_nl50.png（成片第 1/61/124 帧抽帧对照）
 ```
 
-## 从零重建（第三方账户）
+## 复现流程
 
 本仓库的结果全部来自**从源码重建**：现场编出五个 `.so`，再用它们跑 50 步出片，并由官方 `examples/minimax_h3_compare.py` 评测。
 下面是完整流程的摘要；**逐条命令、期望输出与坑清单见 [`docs/从零复现指令流程.md`](docs/从零复现指令流程.md)**，两份内容一致，文档更细。
@@ -111,11 +111,11 @@ figures/  compare_chain_jobs.png / compare_chain_log.png（重建链三个作业
   `flash_attn_2_cuda…so` 2,088,777,840 B），`jobs/setup.py` 解包后把路径写进 `$W/fa_so_path.txt`，出片脚本据此 `export FA_SO_PATH`。
   缺它时导出的是**空串**，最可能报 `Not load library for Cutlass Fa so`——按「必需、未验证可省」理解。
 
-### 第 0.5 步 资产下载到本机 → 上传到你自己的 `$HOME`
+### 第 0.5 步 资产下载到本机 → 上传到 `$HOME`
 
 Release `assets-v1`：<https://github.com/Wang-Yi-Dao/minimax-h3-fl2va-infini-ninetoothed/releases/tag/assets-v1>
 
-| 资产 | 大小 | 上传到你的 `$HOME` 下 | 用途 |
+| 资产 | 大小 | 放到 `$HOME` 下 | 用途 |
 |---|---|---|---|
 | `SHA256SUMS` | 4,413 B | — | 校验清单 |
 | `wheels.tgz` | 88,134,582 B | `minimax_h3/wheels.tgz` | 27 个 `.whl`（transformers 5.14.1 等） |
@@ -124,7 +124,7 @@ Release `assets-v1`：<https://github.com/Wang-Yi-Dao/minimax-h3-fl2va-infini-ni
 | `artifacts-prebuilt.tgz` | 99,251,173 B | `minimax_h3/artifacts-prebuilt.tgz` | 运行期打包，解出 `artifacts/{infinicore,infinilm}.tgz` |
 | `vendor-fa-dtk2604/fa_dtk2604_torch290_cp311.whl` | 658,898,543 B | `minimax_h3/wheels5/…whl` | 厂商 FA（见第 0 步） |
 
-> **Release 资产要在你自己的电脑上下载，不要在集群节点上 curl。**
+> **Release 资产先在本机下载，不要在集群节点上 curl。**
 > 2026-11-13 在批作业里实测：`github.com`（含 Release 直链）、`codeload.github.com` 一律返回 `000`，
 > 集群出口只有镜像（`gh-proxy.com`、`ghproxy.net`）与 PyPI（`pypi.org`、`pypi.sourcefind.cn`）通。
 > 正确姿势：本机下载 → 平台「个人存储」上传到 `$HOME/minimax_h3/…` → 作业里再用。仓库代码本身可以在作业里取（走镜像）。
@@ -168,11 +168,11 @@ cd src && sha256sum -c SHA256SUMS && cd ..
 | 源码输入 | 内容 | 大小 / sha256 前缀 |
 |---|---|---|
 | `src/InfiniCore-snapshot-mit.tar.gz` | 上游 InfiniCore 快照（MIT，含 LICENSE） | 3,759,864 B / `620d40e2` |
-| `src/overlay.tar.gz` | 我们改动的 9 个源文件，根为 `ic/` | 19,254 B / `f1f28f73` |
+| `src/overlay.tar.gz` | 改动过的 9 个源文件，根为 `ic/` | 19,254 B / `f1f28f73` |
 | `src/kernels_deployed.tgz` | 出片所用库的九齿 kernel 源码 `ic/build/ninetoothed/`（106 文件） | 2,457,374 B / `fbf98247` |
 | `src/infinicore_ninetoothed_hygon.patch` | 为 HYGON 打开九齿的上游补丁 | 52,648 B |
 
-节点直连 GitHub 常失败，镜像**由你自选**（也可本机下载 tar 包后上传）：
+节点直连 GitHub 常失败，镜像可自选（也可本机下载 tar 包后上传）：
 
 ```bash
 REL=https://github.com/Wang-Yi-Dao/minimax-h3-fl2va-infini-ninetoothed/archive/refs/heads/main.tar.gz
@@ -186,17 +186,17 @@ tar xzf repo.tgz
 
 ### 第 2 步 作业 A：编工具链
 
-**工作目录由你决定**：`reproduce.sh` 的第一个参数是工作目录，源码、xmake 源码树、pybind11、九齿 AOT 中间文件、构建产物全放它下面。
+**工作目录需先选定**：`reproduce.sh` 的第一个参数是工作目录，源码、xmake 源码树、pybind11、九齿 AOT 中间文件、构建产物全放它下面。
 要能写、建议 ≥10 GB，同一条链上沿用同一路径：
 
 ```bash
 W=$HOME/mmh3_build                       # 持久盘（作业结束还在，可续跑）
 W=${TMPDIR:-/tmp}/mmh3_build             # 节点内存盘（更快，作业结束即消失）
-W=/your/own/writable/dir/mmh3_build      # 你自己的挂载点
+W=/path/to/writable/dir/mmh3_build       # 自备可写挂载点
 mkdir -p "$W" && touch "$W/.p" && rm -f "$W/.p" && echo "WORKDIR=$W"
 ```
 
-参考（2026-11-13 实测，不是要求）：平台批作业里 `/dev/shm`、`/tmp`、`/var/tmp` 的根目录 `mkdir` 会被拒，能写的是 `$HOME` 与平台给的 `$TMPDIR`；你自己的环境未必一样，先用 `touch` 探一下。
+参考（2026-11-13 实测，不是要求）：平台批作业里 `/dev/shm`、`/tmp`、`/var/tmp` 的根目录 `mkdir` 会被拒，能写的是 `$HOME` 与平台给的 `$TMPDIR`；不同环境未必一致，先用 `touch` 探一下。
 
 ```bash
 bash build/reproduce.sh "$W" deps
@@ -263,7 +263,7 @@ TOTAL_SECS=…
 （`model.pipeline_create` / `compute.condition_encoder` / `input.video_vae_encode` / `compute.h3_transformer` /
 `output.video_vae_decode` / `generation.pipeline_total` / `total.end_to_end` / `process.wall` 等）。
 
-同一套生成参数在我们链上实测：`RUN_RC=0 failed=0 run_secs=909 steps=50 sec_per_step=18.18`、`Average SSIM: 79.493%`、
+同一套生成参数在重建链上实测：`RUN_RC=0 failed=0 run_secs=909 steps=50 sec_per_step=18.18`、`Average SSIM: 79.493%`、
 `CMP_RC=0`（那份成片由 `jobs/run_tp8_fl2va.sh` 生成后再喂给 compare 的 `--infinilm-fl2va-video`，所以那次只有 SSIM
 没有时长表；两个脚本的生成参数逐项一致）。
 
@@ -271,9 +271,9 @@ TOTAL_SECS=…
 
 平台网页「批作业」页面即可完成，不需要任何脚本：
 
-1. **项目**：在自己账户里新建（或用已有）项目，把 entrypoint 脚本放进项目文件。**项目内单文件 ≤ 16 KiB**，超了 403；大 python 拆成独立项目文件由 sh 调用。
+1. **项目**：在平台账户下新建（或用已有）项目，把 entrypoint 脚本放进项目文件。**项目内单文件 ≤ 16 KiB**，超了 403；大 python 拆成独立项目文件由 sh 调用。
 2. **配置**：`entrypoint = <脚本名>.sh`、`args` 留空、`kind = batch`。
-3. **表单**：资源范围选 `unit`；**卡数与超时按你账户此刻能拿到的填**（页面 preflight 会告诉你哪些卡数 `allowed`、哪些环境 `ready=true` 且 `modes` 含 `batch`）。
+3. **表单**：资源范围选 `unit`；**卡数与超时按账户此刻可用的填**（页面 preflight 会显示哪些卡数 `allowed`、哪些环境 `ready=true` 且 `modes` 含 `batch`）。
 4. **看结果**：卡片 `Queued → Running → Succeeded / Cancelled`；判据就是第 2–4 步那几条 `XMAKE_TGZ` / `SO_COUNT=5/5` / `REPRO_OK` / `RUN_RC=0` / `Average SSIM` / `CMP_RC=0`。
 5. **报错立刻取消**：不要占着卡排错；取消后到「资源」页面确认空闲卡已恢复。
 
@@ -341,7 +341,7 @@ CRB_LIBS=$HOME/minimax_h3/prebuilt/libs bash jobs/run_tp8_fl2va_cmpgen.sh 50 160
 | ninetoothed | 0.26.0（海光定制，基于 triton 3.5.1） | `build/fetch_wheels.py` 取；triton 必须是海光 build 的 plain build |
 | 环境变量 | `DTK=/opt/dtk J=32 ARCH=gfx936 PHASE=all` | `build/reproduce.sh` 有同名缺省值 |
 | 网络 | 计算节点常连不上 GitHub / PyPI | 镜像自选（`GH_MIRROR`、`MIRROR`），或预置 `XM_TGZ`、`PYBIND11_ROOT` 免下载 |
-| 工作目录 | **由你自选**：本地盘 / 内存盘 / 自己的挂载点，能写且 ≥10 GB | 直接放共享盘上编 xmake 可能慢十倍（我们实测过 15 分钟以上） |
+| 工作目录 | **自行选定**：本地盘 / 内存盘 / 自备挂载点，能写且 ≥10 GB | 直接放共享盘上编 xmake 可能慢十倍（实测 15 分钟以上） |
 
 ## 已知限制 / 未完成
 
