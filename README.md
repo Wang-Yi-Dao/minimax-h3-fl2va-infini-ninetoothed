@@ -199,7 +199,7 @@ mkdir -p "$W" && touch "$W/.p" && rm -f "$W/.p" && echo "WORKDIR=$W"
 bash build/reproduce.sh "$W" deps
 ```
 
-判据：`XMAKE_TGZ=<字节数>`、`DEPS_OK xmake_prebuilt=<tgz> <字节数> B`。也可以直接用 `prebuilt-libs.tgz` 里的 `xmake-toolchain.tgz` 当 `XM_PREBUILT`，跳过本步。
+判据：`XMAKE_TGZ=<字节数>`、`DEPS_OK xmake_prebuilt=<tgz> <字节数> B`。产出的 tgz 默认在 `$P/.deps/xmake-built.tgz`，用 `XM_OUT=<路径>` 指定位置（建议指到持久盘，作业 B 要用）。也可以直接用 `prebuilt-libs.tgz` 里的 `xmake-toolchain.tgz` 当 `XM_PREBUILT`，跳过本步。
 
 ### 第 3 步 作业 B：六步构建
 
