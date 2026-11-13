@@ -27,6 +27,9 @@ alloc_*.txt
 !src/overlay.tar.gz
 !src/kernels_deployed.tgz
 
+# 例外：官方 compare 的参考片（legacy PyTorch 路径的产物，1.5 MB；见 input/README.md）
+!input/reference_fl2va.mp4
+
 # Python / Node
 __pycache__/
 *.pyc

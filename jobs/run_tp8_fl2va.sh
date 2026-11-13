@@ -8,6 +8,7 @@ echo "=== nn38 start $(date -u +%FT%T) steps=$STEPS budget=$BUDGET"
 AFS=${IFAB_AFS_HOME:-$HOME}; H=$AFS/minimax_h3; B=${B:-$H/b1}
 SH=/public/home/aclsylqidf/shared/MiniMax-H3/diffusers
 PROJ=$(cd "$(dirname "$0")" && pwd)
+REPO=$(cd "$PROJ/.." && pwd)   # 仓库根（input/ 在这里）
 W=${IFAB_WORKSPACE_ROOT:-$PWD}
 [ -w "$W" ] || W=/dev/shm/mmh3
 mkdir -p "$W/logs" "$W/out" "$H/logs" "$H/output2"
@@ -89,9 +90,14 @@ rm -f "$LOG"
 LEFT=$(( BUDGET - ( $(date +%s) - T_START ) ))
 echo "RUN_BUDGET=${LEFT}s"
 T0=$(date +%s)
+# 首帧：优先仓库内 input/1280X1280.JPEG，其次平台个人存储 $HOME/input/
+FFRAME="$REPO/input/1280X1280.JPEG"
+[ -f "$FFRAME" ] || FFRAME="$H/input/1280X1280.JPEG"
+[ -f "$FFRAME" ] || { echo "FIRST_FRAME_MISSING $FFRAME"; echo "=== nn38 done $(date -u +%FT%T)"; exit 0; }
+echo "FIRST_FRAME=$FFRAME"
 timeout $LEFT python3 -u examples/minimax_h3.py fl2va \
   --model-path "$W/model" --text "A dog falls asleep" \
-  --first-frame "$H/input/1280X1280.JPEG" --gpus "$TP_IDS" \
+  --first-frame "$FFRAME" --gpus "$TP_IDS" \
   --num-frames 124 --steps $STEPS --seed 42 \
   --output "$W/out/nl_$STEPS.mp4" > "$LOG" 2>&1 &
 PY=$!
@@ -150,7 +156,7 @@ PY
   python3 -c "import skimage.metrics; print('SKIMAGE_OK')" 2>&1 | tail -2
 fi
 REF=""
-for f in "$H/cmp/reference_fl2va.mp4" "$H/artifacts/reference_fl2va.mp4" "$H/input/reference_fl2va.mp4"; do
+for f in "$REPO/input/reference_fl2va.mp4" "$H/cmp/reference_fl2va.mp4" "$H/artifacts/reference_fl2va.mp4" "$H/input/reference_fl2va.mp4"; do
   [ -f "$f" ] && { REF="$f"; break; }
 done
 echo "REF=$REF"

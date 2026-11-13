@@ -80,6 +80,8 @@ jobs/     setup.py（集群侧解包/装配）、run_tp8_fl2va.sh（TP8 出片 +
 build/    bld_infinicore.sh（InfiniCore 构建配方）、rebuild_and_repack.sh（改 kernel 后重生成 + 重打包）、
           from_scratch.sh（只喂三份源码输入的六步构建）、reproduce.sh（一条命令跑通 from_scratch 并校验产物）、
           xmake_build.sh（xmake 源码编译封装）
+input/    reference_fl2va.mp4（官方 compare 的参考片，768×928 / 124 帧 / 24 fps / 1.5 MB，
+          由本项目 legacy PyTorch 路径产出；说明见 input/README.md）
 results/  chain_20261110_xmake.txt / _build.txt / _run.txt（从源码重建的三段链完整作业日志，末段含官方
           compare 原始输出 79.493%）、ab_2step_table.md（2 步 A/B 实测）
 docs/     初赛实验报告.md、课程报告.md、提交清单.md
@@ -93,9 +95,15 @@ figures/  compare_chain_jobs.png / compare_chain_log.png（重建链三个作业
 InfiniCore 五个 `.so` 按下一节「两条路」任一条取得（A 从源码编译 / B 取预编译产物），
 模型权重（MiniMax-H3 diffusers 目录）另行获取（不入库）。
 
+两个输入里，**参考片已随仓库提供**（`input/reference_fl2va.mp4`，1.5 MB，768×928/124 帧/24 fps，
+sha256 `e4e470e0…`）；它是官方 compare 的对照视频，换一段结果立刻变（同一成片：本文件 79.493%，
+另一段 768×928 的片只给 28.660%）。首帧 `input/1280X1280.JPEG` 暂未入库，脚本按「仓库 → `$HOME/input/`」
+顺序查找。详见 `input/README.md`。
+
 ```bash
 # 1) 环境变量与目录
 export W=$HOME/mmh3_ws AFS=$HOME/artifacts SH=/public/home/aclsylqidf/shared/MiniMax-H3/diffusers
+REPO=$(pwd)   # 本仓库根（含 input/reference_fl2va.mp4 与 src/）
 
 # 2) 解包 + 装配运行环境（InfiniCore/InfiniLM/模型软链/评测依赖）
 python3 $W/jobs/setup.py $W $AFS $SH
@@ -108,14 +116,14 @@ export HIP_LAUNCH_BLOCKING=1   # 多卡执行次序确定（可复现性，见�
 # 4) TP8 / 124 帧 / 50 步 / seed 42 出片
 python3 -u $W/InfiniLM/examples/minimax_h3.py fl2va \
   --model-path "$W/model" --text "A dog falls asleep" \
-  --first-frame "$HOME/input/1280X1280.JPEG" \
+  --first-frame "$REPO/input/1280X1280.JPEG" \
   --gpus 0,1,2,3,4,5,6,7 --num-frames 124 --steps 50 --seed 42 \
   --output "$W/out/nl_50.mp4"
 
 # 5) 官方评测（口径：灰度、长边≤512、data_range=255、逐帧算术平均）
 PYTHONPATH="$W/pylibs:$HOME/pylibs_extra:$PYTHONPATH" python3 -u \
   $W/InfiniLM/examples/minimax_h3_compare.py --tasks fl2va --output-dir "$W/cmpout" \
-  --model-path "$W" --reference-fl2va-video "$HOME/cmp/reference_fl2va.mp4" \
+  --model-path "$W" --reference-fl2va-video "$REPO/input/reference_fl2va.mp4" \
   --infinilm-fl2va-video "$W/out/nl_50.mp4"
 ```
 

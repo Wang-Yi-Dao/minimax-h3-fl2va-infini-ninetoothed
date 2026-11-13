@@ -17,7 +17,8 @@ def load(p, step=6):
         for i, f in enumerate(c.decode(video=0)):
             if i % step == 0: d[i] = f.to_ndarray(format="rgb24")
     return d
-files = {"ref50": os.path.join(H, "cmp/reference_fl2va.mp4")}
+REF_REPO = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "input", "reference_fl2va.mp4")
+files = {"ref50": REF_REPO if os.path.isfile(REF_REPO) else os.path.join(H, "cmp/reference_fl2va.mp4")}
 for p in sorted(glob.glob(os.path.join(W, "out", "*.mp4"))):
     files[os.path.basename(p)[:-4]] = p
 newest = {}

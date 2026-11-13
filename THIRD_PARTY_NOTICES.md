@@ -10,6 +10,7 @@
 | PyTorch | 2.9.0+das.opt1.dtk2604 | 参考实现 / legacy 路径 / 评测 | BSD-3-Clause |
 | diffusers / transformers | 0.40.0 / 5.14.1 | 模型加载、processor 装配、pipeline | Apache-2.0 |
 | MiniMax-H3 权重 | 集群共享目录 `/public/home/aclsylqidf/shared/MiniMax-H3/diffusers` | 模型权重，**不随仓库分发** | 见官方模型许可 |
+| FL2VA 参考片 | 仓库内 `input/reference_fl2va.mp4`（1,564,995 B，sha256 `e4e470e0…`） | 官方 compare 的对照视频；**本项目 legacy PyTorch 路径自产**，非第三方素材 | 随本仓库 |
 | scikit-image / imageio / PyAV | 评测环境 | 官方 compare 的 SSIM 与解码 | BSD / BSD / Apache-2.0 |
 
 ## 我们自己的文件
@@ -19,6 +20,8 @@
 - `src/mha_ninetoothed_hygon.cc`：InfiniCore 内的 HYGON fused attention 后端（`op::mha` 桥接）
 - `src/infinicore_ninetoothed_hygon.patch`：为海光打开九齿的整套上游补丁（含 mrope 九齿实现）
 - `jobs/`、`build/`：集群侧装配、出片、A/B、精度探针、评测与构建配方
+- `input/reference_fl2va.mp4`：我们自己的 legacy 后端跑出的参考片（768×928、124 帧、24 fps），
+  官方 compare 的必需输入；`input/README.md` 记录它的规格、哈希与「换片分数就变」的实测对照
 
 ## 环境侧适配补丁（不参与模型数值计算）
 
