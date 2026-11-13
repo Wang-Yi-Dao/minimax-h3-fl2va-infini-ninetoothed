@@ -71,7 +71,8 @@ CMP_RC=0
 ```
 src/      pre_ctxid.c（设备键 shim）、kb7.py（源码级实现）、mha_ninetoothed_hygon.cc（HYGON FA 后端）、
           infinicore_ninetoothed_hygon.patch（为 HYGON 打开九齿的整套上游补丁）
-jobs/     setup.py（集群侧解包/装配）、run_tp8_fl2va.sh（TP8 出片 + 官方 compare）、
+jobs/     setup.py（集群侧解包/装配）、run_tp8_fl2va_cmpgen.sh（TP8 出片交由官方 compare 生成 + 分段时长表）、
+          run_tp8_fl2va.sh（同一流程的另一写法：自己出片、compare 复用成片，无时长表）、
           ab_native_vs_legacy.sh（同 seed 2 步 A/B）、
           fa_precision_probe.py（FA 相对 torch SDPA 的精度随 S 变化）、ssim_report.py（同口径 SSIM 汇总）、
           repro_xmake_step.sh（从源码自举 xmake 工具链，可反复续跑）、
@@ -223,25 +224,48 @@ bash build/reproduce.sh "$W" all
 被掐断后同目录续跑：`CRB_RESUME=1 XM_PREBUILT=… bash build/reproduce.sh "$W" build`。
 六步构建的逐条原始命令（20 条）见 `docs/从零复现指令流程.md` 附录 A；`reproduce.sh` 就是这 20 条的封装。
 
-### 第 4 步 作业 C：出片 + 官方比对
+### 第 4 步 作业 C：出片 + 官方比对（含分段时长表）
 
 ```bash
-CRB_LIBS=<作业B的 libs 目录> bash jobs/run_tp8_fl2va.sh 50 1600
+CRB_LIBS=<作业B的 libs 目录> bash jobs/run_tp8_fl2va_cmpgen.sh 50 1600
 ```
 
-期望输出：
+这个脚本**自己不做生成**，而是把生成交给官方 `examples/minimax_h3_compare.py` 去做：compare 的 `run_task()` 起子进程跑
+`minimax_h3.py fl2va`（50 步 / seed 42 / 124 帧 / 768×928 / `--gpus=0,…,7`、不带 `--legacy`），子进程打出的
+`  compute.h3_transformer  …  s` 这类 `[timing]` 行被 compare 解析，于是末尾多出 `[task] completed in …` 与
+`[timing comparison]` 分段表。reference 侧仍喂现成的 legacy 成片（`--reference-fl2va-video`），不重跑 legacy。
+
+期望输出（`…` 是随机器波动的数值）：
 
 ```
 SETUP_EXIT=0 … SETUP_OK
 FRESH_LIBS_FROM=<作业B libs>   FRESH libinfiniop.so 30752880 …
 FIRST_FRAME=…/input/1280X1280.JPEG
-RUN_RC=0 failed=0 run_secs=909 steps=50 sec_per_step=18.18
-GET_MP4 bytes=1615256
-Size: PASS (768x928)   Length: PASS (124 frames)   Average SSIM: 79.493%
-CMP_RC=0
+CMP_BUDGET=…s
+--- … progress (300s): …s/it
+[task] infinilm_fl2va
+[task] command: …/minimax_h3.py fl2va --model-path=… --text=A dog falls asleep --gpus=0,1,2,3,4,5,6,7 --steps=50 --seed=42 --num-frames=124 --output=…/cmpout/infinilm_fl2va.mp4 --first-frame=…/1280X1280.JPEG
+  model.transformer_create_and_load            … s
+  compute.h3_transformer                       … s
+[task] completed in … s: …/cmpout/infinilm_fl2va.mp4
+[timing comparison] fl2va
+  component                                    reference    infinilm    speedup
+  compute.h3_transformer                       n/a          … s        n/a
+[result] MiniMax-H3 video comparison
+  fl2va: PASS (768x928, 124 frames)
+    Average SSIM: …%
+GET_MP4 bytes=… path=$HOME/output2/cmpgen_<时间戳>.mp4
+CMP_RC=0 failed=0 cmp_secs=…
+TOTAL_SECS=…
 ```
 
-真值只认**本次**的 `$W/logs/nn38_cmp.log`：脚本末行 grep 的是旧名 `nn28_cmp.log`，可能命中上一次运行（已知小坑）。
+表里 reference 侧一律 `n/a`（legacy 侧用的是已有成片，没有重新计时）；InfiniLM 侧是本次运行的 17 个分量
+（`model.pipeline_create` / `compute.condition_encoder` / `input.video_vae_encode` / `compute.h3_transformer` /
+`output.video_vae_decode` / `generation.pipeline_total` / `total.end_to_end` / `process.wall` 等）。
+
+同一套生成参数在我们链上实测：`RUN_RC=0 failed=0 run_secs=909 steps=50 sec_per_step=18.18`、`Average SSIM: 79.493%`、
+`CMP_RC=0`（那份成片由 `jobs/run_tp8_fl2va.sh` 生成后再喂给 compare 的 `--infinilm-fl2va-video`，所以那次只有 SSIM
+没有时长表；两个脚本的生成参数逐项一致）。
 
 ### 第 5 步 平台提交（网页批作业）
 
@@ -258,7 +282,9 @@ CMP_RC=0
 
 ### 第 6 步 判读
 
-四条同时成立才算复现成功：`SO_COUNT=5/5`、`RUN_RC=0 failed=0`、`Size`/`Length` 两个 PASS、`CMP_RC=0`，且 SSIM 与 79.493% 同量级。
+四条同时成立才算复现成功：`SO_COUNT=5/5`、`CMP_RC=0`、`Size`/`Length` 两个 PASS、且 SSIM 与 79.493% 同量级；
+用第 4 步的 `run_tp8_fl2va_cmpgen.sh` 时再加一条：日志里出现 `[timing comparison] fl2va`，且 InfiniLM 侧
+`compute.h3_transformer` 有秒数（reference 侧是 `n/a`）。
 SSIM 口径：RGB→灰度、长边缩到 512、`data_range=255`、逐帧 `structural_similarity` 求均值。
 
 ### 重建链实测（`results/`，8 卡，干净工作区，只喂三份源码输入）
@@ -290,7 +316,7 @@ SSIM 口径：RGB→灰度、长边缩到 512、`data_range=255`、逐帧 `struc
 
 ```bash
 tar xzf $HOME/minimax_h3/prebuilt-libs.tgz -C $HOME/minimax_h3
-CRB_LIBS=$HOME/minimax_h3/prebuilt/libs bash jobs/run_tp8_fl2va.sh 50 1600
+CRB_LIBS=$HOME/minimax_h3/prebuilt/libs bash jobs/run_tp8_fl2va_cmpgen.sh 50 1600
 ```
 
 | 文件 | 大小 | sha256 |
