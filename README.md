@@ -103,6 +103,8 @@ sha256 `e4e470e0…`）是官方 compare 的对照视频，换一段结果立刻
 由脚本从仓库优先读取，缺失时回退 `$HOME/input/1280X1280.JPEG`，再没有就报 `FIRST_FRAME_MISSING`。
 详见 `input/README.md`。
 
+**FA（fused attention）依赖**：非 legacy 路径的 VAE / 音频 VAE / 文本编码走 torch 的 SDPA 适配器，需要厂商 flash-attention 的 `.so`。从 Release `vendor-fa-dtk2604` 取 `fa_dtk2604_torch290_cp311.whl`（658,898,543 B，sha256 `8546e46b…`，内含 `flash_attn_2_cuda…so` 2,088,777,840 B），`jobs/setup.py` 解包后把路径写进 `$W/fa_so_path.txt`，出片脚本据此 `export FA_SO_PATH`。缺它时脚本导出的是**空串**，最可能报 `Not load library for Cutlass Fa so`——文档里请按「必需、未验证可省」理解。
+
 **新建账户（看不见本项目任何存储）请直接按 [`docs/从零复现指令流程.md`](docs/从零复现指令流程.md) 走**：
 第 0.5 步把 Release `assets-v1` 里的 wheels、InfiniLM 源码、预编译库下载后上传到自己的 `$HOME`，
 再依次提交三个批作业；权重走平台公共路径 `/public/home/aclsylqidf/shared/MiniMax-H3/diffusers`。
