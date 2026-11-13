@@ -124,7 +124,7 @@ Release `assets-v1`：<https://github.com/Wang-Yi-Dao/minimax-h3-fl2va-infini-ni
 | `vendor-fa-dtk2604/fa_dtk2604_torch290_cp311.whl` | `minimax_h3/wheels5/…whl` | 厂商 FA（见第 0 步） |
 
 > **Release 资产先在本机下载，不要在集群节点上 curl。**
-> 2026-11-13 在批作业里实测：`github.com`（含 Release 直链）、`codeload.github.com` 一律返回 `000`，
+> 在批作业里实测：`github.com`（含 Release 直链）、`codeload.github.com` 一律返回 `000`，
 > 集群出口只有镜像（`gh-proxy.com`、`ghproxy.net`）与 PyPI（`pypi.org`、`pypi.sourcefind.cn`）通。
 > 正确姿势：本机下载 → 平台「个人存储」上传到 `$HOME/minimax_h3/…` → 作业里再用。仓库代码本身可以在作业里取（走镜像）。
 
@@ -179,7 +179,7 @@ curl -fL --http1.1 --retry 3 --retry-delay 3 -m 600 -o repo.tgz "$MIRROR$REL" \
 tar xzf repo.tgz
 ```
 
-2026-11-13 节点实测（仅供选型）：直连 `github.com`、`codeload.github.com` = `000`；`gh-proxy.com` 5 s 成功；`ghproxy.net` 偶发 `curl: (92) HTTP/2 stream not closed cleanly`。
+节点实测（仅供选型）：直连 `github.com`、`codeload.github.com` = `000`；`gh-proxy.com` 5 s 成功；`ghproxy.net` 偶发 `curl: (92) HTTP/2 stream not closed cleanly`。
 
 ### 第 2 步 作业 A：编工具链
 
@@ -193,7 +193,7 @@ W=/path/to/writable/dir/mmh3_build       # 自备可写挂载点
 mkdir -p "$W" && touch "$W/.p" && rm -f "$W/.p" && echo "WORKDIR=$W"
 ```
 
-参考（2026-11-13 实测，不是要求）：平台批作业里 `/dev/shm`、`/tmp`、`/var/tmp` 的根目录 `mkdir` 会被拒，能写的是 `$HOME` 与平台给的 `$TMPDIR`；不同环境未必一致，先用 `touch` 探一下。
+参考（实测，不是要求）：平台批作业里 `/dev/shm`、`/tmp`、`/var/tmp` 的根目录 `mkdir` 会被拒，能写的是 `$HOME` 与平台给的 `$TMPDIR`；不同环境未必一致，先用 `touch` 探一下。
 
 ```bash
 bash build/reproduce.sh "$W" deps

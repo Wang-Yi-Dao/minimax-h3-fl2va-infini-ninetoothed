@@ -22,7 +22,7 @@ legacy 全量生成），得到的参考片正是这一份。
 |---|---|
 | 用途 | `minimax_h3.py fl2va --first-frame`，出片首帧 |
 | 规格 | 1280×1280 JPEG |
-| 来源 | 平台个人存储 `$HOME/input/1280X1280.JPEG`（2026-11-13 从平台存储接口取回，与本项目出片所用同一文件） |
+| 来源 | 平台个人存储 `$HOME/input/1280X1280.JPEG`（从平台存储接口取回，与本项目出片所用同一文件） |
 
 查找顺序：仓库 `input/1280X1280.JPEG` → `$HOME/input/1280X1280.JPEG`；两者都没有时
 `jobs/run_tp8_fl2va.sh` 打 `FIRST_FRAME_MISSING` 并 `exit 0`（看起来像「成功但没片」，别误判）。
