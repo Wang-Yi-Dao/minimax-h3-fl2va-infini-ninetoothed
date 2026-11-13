@@ -74,7 +74,6 @@ src/      pre_ctxid.c（设备键 shim）、kb7.py（源码级实现）、mha_ni
 jobs/     setup.py（集群侧解包/装配）、run_tp8_fl2va.sh（TP8 出片 + 官方 compare）、
           ab_native_vs_legacy.sh（同 seed 2 步 A/B）、
           fa_precision_probe.py（FA 相对 torch SDPA 的精度随 S 变化）、ssim_report.py（同口径 SSIM 汇总）、
-          submit_multi.mjs / submit_snap.mjs（平台批作业提交器）、
           repro_xmake_step.sh（从源码自举 xmake 工具链，可反复续跑）、
           repro_build.sh（校验 sha256 → 从三份源码重建五个 .so）、repro_run.sh（50 步出片 + 官方 compare）
 build/    bld_infinicore.sh（InfiniCore 构建配方）、rebuild_and_repack.sh（改 kernel 后重生成 + 重打包）、
@@ -82,11 +81,9 @@ build/    bld_infinicore.sh（InfiniCore 构建配方）、rebuild_and_repack.sh
           xmake_build.sh（xmake 源码编译封装）
 input/    reference_fl2va.mp4（官方 compare 的参考片，768×928 / 124 帧 / 24 fps / 1.5 MB，
           由本项目 legacy PyTorch 路径产出）、1280X1280.JPEG（出片首帧，146,182 B）；说明见 input/README.md
-stage/    afs.mjs / afscli.mjs（平台个人存储上传下载）、batch.mjs / gpu.mjs / submit_job.mjs /
-          probe.mjs / watch.mjs / jstop.mjs / res.mjs（批作业提交、探活、轮询、取消、查空闲卡）
 results/  chain_20261110_xmake.txt / _build.txt / _run.txt（从源码重建的三段链完整作业日志，末段含官方
           compare 原始输出 79.493%）、ab_2step_table.md（2 步 A/B 实测）
-docs/     初赛实验报告.md、课程报告.md、提交清单.md、从零复现指令流程.md（第三方账户从零复现的逐条指令）
+docs/     从零复现指令流程.md（第三方账户从零复现的逐条指令）
 figures/  compare_chain_jobs.png / compare_chain_log.png（重建链三个作业的列表与日志，官方 compare 79.493%）、
           video_frames_nl50.png（成片第 1/61/124 帧抽帧对照）
 ```
@@ -138,6 +135,22 @@ PYTHONPATH="$W/pylibs:$HOME/pylibs_extra:$PYTHONPATH" python3 -u \
 
 批作业平台上的等价封装见 `jobs/run_tp8_fl2va.sh`（含 fail-fast 看门狗与日志归档）。
 
+## 构建前提
+
+| 项 | 要求 | 说明 |
+|---|---|---|
+| 工具链 | DTK 26.04，安装于 `/opt/dtk`（`hipcc`、`llvm/`、`cuda/cuda` 头与库） | 目标架构 `gfx936` |
+| 编译器 | `/opt/dtk/llvm/bin/clang`（编 `src/pre_ctxid.c`）；也可用系统 gcc | 只编 shim，不编模型 |
+| Python | 3.11（**cp311**） | 镜像自带的 3.12 轮子在本链路不可用，xmake 必须用它 |
+| xmake | ≥ 3.1.2，**从源码编**：官方 bundle 依赖 GLIBC_2.38，本镜像只有 2.35 | `build/reproduce.sh` 自动处理，产物可复用（`XM_PREBUILT`） |
+| pybind11 | 3.1.0，解包后 `include/pybind11/pybind11.h` 必须存在 | 四源回退（pypi → 清华 → 阿里 → GitHub tarball），全失败报 `PYBIND11_DL_FAIL` |
+| ninetoothed | 0.26.0（海光定制，基于 triton 3.5.1） | `build/fetch_wheels.py` 取；triton 必须是海光 build 的 plain build |
+| 环境变量 | `DTK=/opt/dtk J=32 ARCH=gfx936 PHASE=all` | `build/reproduce.sh` 有同名缺省值 |
+| 网络 | 计算节点常连不上 GitHub / PyPI | 设 `GH_MIRROR`（缺省 `https://ghproxy.net/`），或预置 `XM_TGZ`、`PYBIND11_ROOT` 免下载 |
+| 工作目录 | 必须本地盘：`/dev/shm` → `/tmp` → `$HOME/tmp` | 放 AFS 上编 xmake 要 15 min+，会顶到单作业时限 |
+
+六步构建的逐条命令见 `docs/从零复现指令流程.md` 附录 A；`bash build/reproduce.sh <工作目录> all` 就是这 20 条的封装。
+
 ## 两条路：从源码编译 / 直接用预编译产物
 
 两条路的终点完全一样：五个 `.so` 落到同一个目录，再用同一套命令跑 50 步出片与官方 compare。
@@ -179,7 +192,7 @@ GitHub tag tarball 依次回退，解包后校验 `include/pybind11/pybind11.h` 
 #    （安装布局 bin/xmake + share/xmake，下游直接解包即用）。
 export XM_PREBUILT=<上一步产出的 xmake-toolchain.tgz>
 
-# 1) 取三个输入，按 build/README.md 设好 DTK / wheels / pybind11
+# 1) 取三个输入，按上文「构建前提」设好 DTK / pybind11 / wheels
 export IC_TGZ=$PWD/src/InfiniCore-snapshot-mit.tar.gz
 export OVL_TGZ=$PWD/src/overlay.tar.gz
 export CRB_KERNELS_TGZ=$PWD/src/kernels_deployed.tgz
@@ -242,7 +255,7 @@ bash jobs/run_tp8_fl2va.sh 50 2300
 `xmake-toolchain.tgz`），慢盘环境下用它可省掉重复自举。
 
 原始日志：`results/chain_20261110_xmake.txt`、`results/chain_20261110_build.txt`、`results/chain_20261110_run.txt`；
-细节与踩坑见 `build/README.md`。
+细节与踩坑见上文「构建前提」与 `docs/从零复现指令流程.md` 的坑清单。
 
 ## 已知限制 / 未完成
 

@@ -14,7 +14,7 @@
 # 快照解包本身不慢：本集群实测 916 个小文件 9 秒、7469 个成员约 40-75 秒，
 # 真正的耗时是编 xmake 与编 InfiniCore，所以工具链优先用官方预编译 bundle。
 # 产物：<work>/ic/build/linux/x86_64/release 下五个 .so。
-# 端到端出片 + 官方评分见 build/README.md（jobs/run_tp8_fl2va.sh，另需模型权重与参考视频）。
+# 端到端出片 + 官方评分见 README.md 与 docs/从零复现指令流程.md（jobs/run_tp8_fl2va.sh，另需模型权重与参考视频）。
 set -uo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)

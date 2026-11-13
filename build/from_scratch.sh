@@ -27,7 +27,7 @@ PYTHON_INCLUDE=${PYTHON_INCLUDE:-/usr/local/include/python3.11}
 PYTHON_LIBDIR=${PYTHON_LIBDIR:-/usr/local/lib}
 PYTHON_LIBNAME=${PYTHON_LIBNAME:-python3.11}
 # The interpreter must be the one the wheels were built for: the DTK torch is
-# cp311-only, so a 3.11 wheel set is what actually works here (see build/README.md).
+# cp311-only, so a 3.11 wheel set is what actually works here (see README.md, section "构建前提").
 PY=${PY:-python3.11}
 J=${J:-32}
 ARCH=${ARCH:-gfx936}
@@ -44,7 +44,7 @@ WHL_PID=
 if [ -z "$WHEELS" ]; then
   # No wheel directory given: fetch the four wheels (ninetoothed, sympy, mpmath,
   # numpy, plus the Hygon triton build) from PyPI's JSON API.  pip in this image
-  # cannot do it -- see build/README.md and fetch_wheels.py.
+  # cannot do it -- see README.md (构建前提) and fetch_wheels.py.
   # This is a few hundred MB of downloads, so run it in the background and let the
   # snapshot extraction and the xmake compile below overlap with it; the unpack
   # happens in step 2, once both sides are done.
@@ -239,7 +239,7 @@ rm -rf "$W/ic/build/ninetoothed"/*
 mkdir -p "$W/ic/build/ninetoothed"
 if [ -n "${CRB_KERNELS_TGZ:-}" ] && [ -f "${CRB_KERNELS_TGZ}" ]; then
   # Fallback: a pre-generated kernel archive (ic/build/ninetoothed/*), produced by
-  # this same script on a node where the AOT compiler could run.  See build/README.md.
+  # this same script on a node where the AOT compiler could run.  See README.md (构建前提).
   stage "step 3b/6 pre-generated kernels ($CRB_KERNELS_TGZ)"
   tar tzf "$CRB_KERNELS_TGZ" | head -12
   tar xzf "$CRB_KERNELS_TGZ" -C "$W" || { echo "KERNELS_TGZ_FAILED"; exit 1; }
